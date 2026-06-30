@@ -1,25 +1,17 @@
-import { MinipiAgentRuntime, resolveWorkspacePaths } from "../../index.js";
-
-export type RuntimeModelOverride = {
-  provider: string;
-  modelId: string;
-  thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
-  apiKey?: string;
-};
+import { PiAgentRuntime, resolveWorkspacePaths } from "../index.js";
 
 type RuntimeCacheEntry = {
   workspace: string;
   userId: string;
-  runtime: MinipiAgentRuntime;
+  runtime: PiAgentRuntime;
   lastUsedAt: number;
   activeRequests: number;
-  appliedModelOverrideSignature?: string;
 };
 
-type ChatOnceInput = Parameters<MinipiAgentRuntime["chatOnce"]>[0];
+type ChatInput = Parameters<PiAgentRuntime["chat"]>[0];
 
 export type ChatRunResult = {
-  output: Awaited<ReturnType<MinipiAgentRuntime["chatOnce"]>>;
+  output: Awaited<ReturnType<PiAgentRuntime["chat"]>>;
   recoveredSession?: boolean;
   previousSessionId?: string;
 };
@@ -30,7 +22,6 @@ export type RuntimeManagerOptions = {
 
 export class RuntimeManager {
   private readonly runtimes = new Map<string, RuntimeCacheEntry>();
-  private readonly modelOverrides = new Map<string, RuntimeModelOverride>();
 
   constructor(private readonly options: RuntimeManagerOptions) {}
 
@@ -40,11 +31,11 @@ export class RuntimeManager {
     prompt: string;
     sessionId?: string;
     stream: boolean;
-    onTextDelta?: ChatOnceInput["onTextDelta"];
-    onToolEvent?: ChatOnceInput["onToolEvent"];
+    onTextDelta?: ChatInput["onTextDelta"];
+    onToolEvent?: ChatInput["onToolEvent"];
   }): Promise<ChatRunResult> {
-    const run = async (runtime: MinipiAgentRuntime, sessionId?: string) => {
-      return runtime.chatOnce({
+    const run = async (runtime: PiAgentRuntime, sessionId?: string) => {
+      return runtime.chat({
         prompt: input.prompt,
         userId: input.userId,
         sessionId,
@@ -77,26 +68,20 @@ export class RuntimeManager {
   async withNewSessionRuntime<T>(
     workspace: string,
     userId: string,
-    fn: (runtime: MinipiAgentRuntime, sessionId: string) => Promise<T>,
+    fn: (runtime: PiAgentRuntime, sessionId: string) => Promise<T>,
   ): Promise<T> {
-    // 保证 workspace 和 userId 规范性一致
     const normalizedWorkspace = this.normalizeWorkspaceKey(workspace);
     const normalizedUserId = this.normalizeUserIdKey(userId);
 
-    // 新建 RuntimeEntry
     const entry: RuntimeCacheEntry = {
       workspace: normalizedWorkspace,
       userId: normalizedUserId,
-      runtime: new MinipiAgentRuntime({ workspace: normalizedWorkspace, userId: normalizedUserId }),
+      runtime: new PiAgentRuntime({ workspace: normalizedWorkspace, userId: normalizedUserId }),
       lastUsedAt: Date.now(),
       activeRequests: 1,
     };
     let registeredKey: string | undefined;
     try {
-      // 模型配置检查
-      await this.ensureRuntimeModelOverride(entry);
-      
-      // 将 RuntimeEntry 注册到缓存
       const sessionId = await entry.runtime.newSession();
       registeredKey = this.makeRuntimeKey(normalizedWorkspace, normalizedUserId, sessionId);
       this.runtimes.set(registeredKey, entry);
@@ -114,24 +99,17 @@ export class RuntimeManager {
     workspace: string,
     userId: string,
     sessionId: string | undefined,
-    fn: (runtime: MinipiAgentRuntime) => Promise<T>,
+    fn: (runtime: PiAgentRuntime) => Promise<T>,
   ): Promise<T> {
     const entry = this.getRuntimeEntry(workspace, userId, sessionId);
     entry.activeRequests += 1;
     entry.lastUsedAt = Date.now();
     try {
-      await this.ensureRuntimeModelOverride(entry);
       return await fn(entry.runtime);
     } finally {
       entry.activeRequests -= 1;
       entry.lastUsedAt = Date.now();
     }
-  }
-
-  async setModelOverride(workspace: string, override: RuntimeModelOverride): Promise<void> {
-    const normalizedWorkspace = this.normalizeWorkspaceKey(workspace);
-    this.modelOverrides.set(normalizedWorkspace, override);
-    await this.applyModelOverrideToWorkspace(normalizedWorkspace, override);
   }
 
   async cleanupIdleRuntimes(): Promise<void> {
@@ -169,7 +147,7 @@ export class RuntimeManager {
       entry = {
         workspace: normalizedWorkspace,
         userId: normalizedUserId,
-        runtime: new MinipiAgentRuntime({ workspace: normalizedWorkspace, userId: normalizedUserId }),
+        runtime: new PiAgentRuntime({ workspace: normalizedWorkspace, userId: normalizedUserId }),
         lastUsedAt: Date.now(),
         activeRequests: 0,
       };
@@ -184,33 +162,6 @@ export class RuntimeManager {
     if (!entry) return;
     this.runtimes.delete(key);
     if (entry.activeRequests <= 0) await entry.runtime.dispose().catch(() => undefined);
-  }
-
-  private async ensureRuntimeModelOverride(entry: RuntimeCacheEntry): Promise<void> {
-    const override = this.modelOverrides.get(entry.workspace);
-    if (!override) return;
-    const signature = JSON.stringify(override);
-    if (entry.appliedModelOverrideSignature === signature) return;
-    await entry.runtime.setModelConfig(override);
-    entry.appliedModelOverrideSignature = signature;
-  }
-
-  private async applyModelOverrideToWorkspace(workspace: string, override: RuntimeModelOverride): Promise<void> {
-    const signature = JSON.stringify(override);
-    const targets = [...this.runtimes.values()].filter((entry) => entry.workspace === workspace);
-    await Promise.all(
-      targets.map(async (entry) => {
-        entry.activeRequests += 1;
-        try {
-          await entry.runtime.setModelConfig(override);
-          entry.appliedModelOverrideSignature = signature;
-          entry.lastUsedAt = Date.now();
-        } finally {
-          entry.activeRequests -= 1;
-          entry.lastUsedAt = Date.now();
-        }
-      }),
-    );
   }
 
   private makeRuntimeKey(workspace: string, userId: string, sessionId?: string): string {

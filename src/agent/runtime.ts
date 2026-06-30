@@ -1,11 +1,15 @@
-import type { AgentSessionRuntime } from "@mariozechner/pi-coding-agent";
-import { SessionManager } from "@mariozechner/pi-coding-agent";
-import { collectAssistantText, toToolStreamEvent } from "./assistantEvents.js";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import {
-  createMinipiRuntime,
-  bindRuntimeSession,
-  type RuntimeOptions,
-} from "./sessionFactory.js";
+  createAgentSessionFromServices,
+  createAgentSessionRuntime,
+  createAgentSessionServices,
+  SessionManager,
+  SettingsManager,
+  type AgentSessionRuntime,
+  type CreateAgentSessionRuntimeFactory,
+} from "@mariozechner/pi-coding-agent";
+import { collectAssistantText, toToolStreamEvent } from "./events.js";
 import {
   enforceRetentionPolicy,
   getRetentionMetadataFile,
@@ -13,24 +17,30 @@ import {
   type RetentionPolicy,
 } from "./retention.js";
 import {
+  ensureWorkspaceDirs,
   listWorkspaceNames,
   resolveWorkspacePaths,
+  type WorkspaceOptions,
   type WorkspacePaths,
-} from "./workspace.js";
+} from "../workspace/paths.js";
 import { AgentRuntimeConfig } from "./config.js";
-import type { LayeredMemoryStore } from "../memory/store.js";
-import type { JsonSummaryStore } from "../memory/summaryStore.js";
+import { buildSystemPrompt } from "../prompt/system.js";
 import type {
-  ChatOnceInput,
+  ChatInput,
   ChatOptions,
   ChatResult,
 } from "../types.js";
 
-export class MinipiAgentRuntime {
+export type RuntimeOptions = WorkspaceOptions & {
+  cwd?: string;
+  agentDir?: string;
+  sessionDir?: string;
+  envFilePath?: string;
+};
+
+export class PiAgentRuntime {
   private runtime?: AgentSessionRuntime;
   private workspace?: WorkspacePaths;
-  private store?: LayeredMemoryStore;
-  private summaryStore?: JsonSummaryStore;
   private initPromise?: Promise<void>;
   private operationQueue: Promise<void> = Promise.resolve();
   private readonly retentionPolicy: RetentionPolicy;
@@ -49,17 +59,9 @@ export class MinipiAgentRuntime {
     if (this.initPromise) return this.initPromise;
 
     this.initPromise = (async () => {
-      const { runtime, workspace, store, summaryStore } =
-        await createMinipiRuntime(this.options, this.config);
+      const { runtime, workspace } = await createPiRuntime(this.options, this.config);
       this.runtime = runtime;
       this.workspace = workspace;
-      this.store = store;
-      this.summaryStore = summaryStore;
-
-      await this.config.startWatching(async () => {
-        if (!this.runtime) return;
-        await this.config.applyToRuntime(this.runtime);
-      });
     })();
 
     try {
@@ -69,24 +71,13 @@ export class MinipiAgentRuntime {
     }
   }
 
-  async chatOnce(input: ChatOnceInput): Promise<ChatResult> {
-    return this.chat(input.prompt, {
-      sessionId: input.sessionId,
-      userId: input.userId,
-      stream: input.stream,
-      onTextDelta: input.onTextDelta,
-      onToolEvent: input.onToolEvent,
-    });
-  }
-
-  async chat(text: string, options: ChatOptions = {}): Promise<ChatResult> {
-    return this.runExclusive(() => this.chatUnlocked(text, options));
+  async chat(input: ChatInput): Promise<ChatResult> {
+    return this.runExclusive(() => this.chatUnlocked(input.prompt, input));
   }
 
   async selectSession(sessionId: string): Promise<void> {
     await this.runExclusive(async () => {
       await this.init();
-      await this.config.reloadIfChanged(this.getRuntime());
       await this.switchToSession(sessionId);
     });
   }
@@ -96,7 +87,7 @@ export class MinipiAgentRuntime {
       await this.init();
       const runtime = this.getRuntime();
       await runtime.newSession();
-      await bindRuntimeSession(runtime);
+      await runtime.session.bindExtensions({});
       await this.config.applyToRuntime(runtime);
       return runtime.session.sessionId;
     });
@@ -112,64 +103,9 @@ export class MinipiAgentRuntime {
     }));
   }
 
-  async listMemories(limit = 50): Promise<
-    Array<{
-      id: string;
-      visibility: string;
-      kind: string;
-      text: string;
-      confidence: number;
-      createdAt: number;
-      lastUsedAt: number;
-    }>
-  > {
-    await this.init();
-    const records = await this.getStore().list();
-    return records
-      .sort((a, b) => b.lastUsedAt - a.lastUsedAt)
-      .slice(0, limit)
-      .map((item) => ({
-        id: item.id,
-        visibility: item.visibility,
-        kind: item.kind,
-        text: item.text,
-        confidence: item.confidence,
-        createdAt: item.createdAt,
-        lastUsedAt: item.lastUsedAt,
-      }));
-  }
-
-  async listSummaries(limit = 50): Promise<
-    Array<{
-      id: string;
-      text: string;
-      turnStart: number;
-      turnEnd: number;
-      createdAt: number;
-      lastUsedAt: number;
-      promotedToMemoryId?: string;
-    }>
-  > {
-    await this.init();
-    const records = await this.getSummaryStore().list();
-    return records
-      .sort((a, b) => b.lastUsedAt - a.lastUsedAt)
-      .slice(0, limit)
-      .map((item) => ({
-        id: item.id,
-        text: item.text,
-        turnStart: item.turnStart,
-        turnEnd: item.turnEnd,
-        createdAt: item.createdAt,
-        lastUsedAt: item.lastUsedAt,
-        promotedToMemoryId: item.promotedToMemoryId,
-      }));
-  }
-
   async getSnapshot() {
     return this.runExclusive(async () => {
       await this.init();
-      await this.config.reloadIfChanged(this.getRuntime());
       return this.buildSnapshot();
     });
   }
@@ -193,28 +129,7 @@ export class MinipiAgentRuntime {
       }));
   }
 
-  async setModelConfig(input: {
-    provider: string;
-    modelId: string;
-    thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
-    apiKey?: string;
-  }) {
-    return this.runExclusive(async () => {
-      await this.init();
-      const session = this.getRuntime().session;
-      if (input.apiKey) {
-        session.modelRegistry.authStorage.setRuntimeApiKey(input.provider, input.apiKey);
-      }
-      const model = session.modelRegistry.find(input.provider, input.modelId);
-      if (!model) throw new Error(`Model not found: ${input.provider}/${input.modelId}`);
-      await session.setModel(model);
-      if (input.thinkingLevel) session.setThinkingLevel(input.thinkingLevel);
-      return this.buildSnapshot();
-    });
-  }
-
   async dispose(): Promise<void> {
-    this.config.dispose();
     if (!this.runtime) return;
     await this.runtime.dispose();
     this.runtime = undefined;
@@ -228,8 +143,6 @@ export class MinipiAgentRuntime {
   private async chatUnlocked(text: string, options: ChatOptions = {}): Promise<ChatResult> {
     await this.init();
     const runtime = this.getRuntime();
-    await this.config.reloadIfChanged(runtime);
-
     if (options.sessionId) await this.switchToSession(options.sessionId);
 
     const session = runtime.session;
@@ -274,16 +187,6 @@ export class MinipiAgentRuntime {
       userId: this.getWorkspace().userId,
       retention,
     };
-  }
-
-  private getStore(): LayeredMemoryStore {
-    if (!this.store) throw new Error("Memory store not initialized");
-    return this.store;
-  }
-
-  private getSummaryStore(): JsonSummaryStore {
-    if (!this.summaryStore) throw new Error("Summary store not initialized");
-    return this.summaryStore;
   }
 
   private getRuntime(): AgentSessionRuntime {
@@ -343,8 +246,6 @@ export class MinipiAgentRuntime {
       },
       retention,
       sessions: await this.listSessions(),
-      memories: await this.listMemories(),
-      summaries: await this.listSummaries(),
     };
   }
 
@@ -355,7 +256,79 @@ export class MinipiAgentRuntime {
     const target = sessions.find((session) => session.id === sessionId);
     if (!target) throw new Error(`Session not found: ${sessionId}`);
     await runtime.switchSession(target.path);
-    await bindRuntimeSession(runtime);
+    await runtime.session.bindExtensions({});
     await this.config.applyToRuntime(runtime);
   }
 }
+
+async function createPiRuntime(
+  options: RuntimeOptions = {},
+  config = new AgentRuntimeConfig({ envFilePath: options.envFilePath }),
+): Promise<{
+  runtime: AgentSessionRuntime;
+  workspace: WorkspacePaths;
+  config: AgentRuntimeConfig;
+}> {
+  const workspace = resolveWorkspacePaths(options);
+  await ensureWorkspaceDirs(workspace);
+  const cwd = options.cwd ?? workspace.cwd;
+  const agentDir = options.agentDir ?? workspace.agentDir;
+  const sessionDir = options.sessionDir ?? workspace.sessionDir;
+  const workspaceAgents = await readWorkspaceAgents(workspace.workspaceDir);
+  const settingsManager = SettingsManager.inMemory();
+
+  const createRuntime: CreateAgentSessionRuntimeFactory = async ({
+    cwd: effectiveCwd,
+    sessionManager,
+    sessionStartEvent,
+  }) => {
+    const services = await createAgentSessionServices({
+      cwd: effectiveCwd,
+      agentDir,
+      settingsManager,
+      resourceLoaderOptions: {
+        noExtensions: true,
+        noSkills: true,
+        noPromptTemplates: true,
+        noThemes: true,
+        systemPromptOverride: () =>
+          buildSystemPrompt({
+            workspace: workspace.workspace,
+            userId: workspace.userId,
+            workspaceAgents,
+          }),
+      },
+    });
+
+    return {
+      ...(await createAgentSessionFromServices({
+        services,
+        sessionManager,
+        sessionStartEvent,
+      })),
+      services,
+      diagnostics: services.diagnostics,
+    };
+  };
+
+  const runtime = await createAgentSessionRuntime(createRuntime, {
+    cwd,
+    agentDir,
+    sessionManager: SessionManager.create(cwd, sessionDir),
+  });
+
+  await runtime.session.bindExtensions({});
+  await config.applyToRuntime(runtime);
+  return { runtime, workspace, config };
+}
+
+async function readWorkspaceAgents(workspaceDir: string): Promise<string> {
+  try {
+    return (await readFile(join(workspaceDir, "AGENTS.md"), "utf8")).trim();
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return "";
+    throw error;
+  }
+}
+

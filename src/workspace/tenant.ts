@@ -17,7 +17,7 @@ export type ResolvedTenantIdentity = TenantIdentity & {
 };
 
 export function shouldRequireUserIdFromEnv(env: NodeJS.ProcessEnv = process.env): boolean {
-  return parseBooleanEnv(env.MINIPI_REQUIRE_USER_ID, false);
+  return parseBooleanEnv(env.PI_REQUIRE_USER_ID, false);
 }
 
 export function resolveTenantIdentity(

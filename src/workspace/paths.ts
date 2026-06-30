@@ -9,7 +9,7 @@ import {
 
 const projectRootDir = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const defaultWorkspaceRootDir = resolve(
-  process.env.MINIPI_WORKSPACES_DIR ?? join(projectRootDir, ".workspaces"),
+  process.env.PI_WORKSPACES_DIR ?? join(projectRootDir, ".workspaces"),
 );
 
 export type WorkspaceOptions = {
@@ -27,10 +27,6 @@ export type WorkspacePaths = {
   sharedDir: string;
   agentDir: string;
   sessionDir: string;
-  memoryFile: string;
-  userMemoryFile: string;
-  workspaceMemoryFile: string;
-  summaryFile: string;
   cwd: string;
 };
 
@@ -50,9 +46,6 @@ export function resolveWorkspacePaths(options: WorkspaceOptions = {}): Workspace
   const sharedDir = join(workspaceDir, "shared");
   const agentDir = workspaceDir;
   const sessionDir = join(userDir, "sessions");
-  const userMemoryFile = join(userDir, "memory.json");
-  const workspaceMemoryFile = join(sharedDir, "memory.json");
-  const summaryFile = join(userDir, "summary.json");
 
   return {
     rootDir,
@@ -63,10 +56,6 @@ export function resolveWorkspacePaths(options: WorkspaceOptions = {}): Workspace
     sharedDir,
     agentDir,
     sessionDir,
-    memoryFile: userMemoryFile,
-    userMemoryFile,
-    workspaceMemoryFile,
-    summaryFile,
     cwd: userDir,
   };
 }

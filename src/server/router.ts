@@ -1,13 +1,10 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { resolveTenantIdentity } from "../../runtime/tenant.js";
-import { PRODUCT_ASSISTANT_PROMPT } from "../../prompt/product/index.js";
-import type { ProductLeadingAiOverviewManager } from "../managers/productLeadingAiOverviewManager.js";
-import type { RuntimeManager, RuntimeModelOverride } from "../managers/runtimeManager.js";
-import { HttpError, readJson, requireString, sendJson, sendSseHeaders, writeSse } from "../utils/http.js";
+import { resolveTenantIdentity } from "../workspace/tenant.js";
+import type { RuntimeManager } from "./runtimes.js";
+import { HttpError, readJson, requireString, sendJson, sendSseHeaders, writeSse } from "./http.js";
 
 export type ApiRouterOptions = {
   runtimeManager: RuntimeManager;
-  productLeadingAiOverviewManager: ProductLeadingAiOverviewManager;
 };
 
 export class ApiRouter {
@@ -30,13 +27,6 @@ export class ApiRouter {
 
     if (req.method === "POST" && url.pathname === "/api/chat") {
       await this.handleChat(req, res);
-      return;
-    }
-
-    if (req.method === "POST" && url.pathname === "/api/product-leading/ai-overview") {
-      const body = await readJson(req);
-      const data = await this.options.productLeadingAiOverviewManager.getOverview(body);
-      sendJson(res, 200, { ok: true, data });
       return;
     }
 
@@ -67,27 +57,6 @@ export class ApiRouter {
       return;
     }
 
-    if (req.method === "POST" && url.pathname === "/api/model-config") {
-      const body = await readJson(req);
-      const tenant = this.resolveApiTenant({
-        workspace: String(body.workspace ?? "demo"),
-        userId: typeof body.userId === "string" ? body.userId : undefined,
-      });
-      const workspace = tenant.workspace;
-      const override: RuntimeModelOverride = {
-        provider: String(body.provider ?? ""),
-        modelId: String(body.modelId ?? ""),
-        thinkingLevel: body.thinkingLevel ? String(body.thinkingLevel) as RuntimeModelOverride["thinkingLevel"] : undefined,
-        apiKey: body.apiKey ? String(body.apiKey) : undefined,
-      };
-      await this.options.runtimeManager.setModelOverride(workspace, override);
-      await this.options.runtimeManager.withRuntime(workspace, tenant.userId, undefined, async (runtime) => {
-        const snapshot = await runtime.getSnapshot();
-        sendJson(res, 200, { ok: true, snapshot });
-      });
-      return;
-    }
-
     sendJson(res, 404, { ok: false, error: "Not found" });
   }
 
@@ -99,7 +68,7 @@ export class ApiRouter {
     });
     const workspace = tenant.workspace;
     const userId = tenant.userId;
-    const prompt = this.resolveChatPrompt(body);
+    const prompt = requireString(body.prompt, "prompt");
     const sessionId = body.sessionId ? String(body.sessionId) : undefined;
     const includeSnapshot = body.includeSnapshot === true;
 
@@ -152,58 +121,6 @@ export class ApiRouter {
     } finally {
       res.end();
     }
-  }
-
-  private resolveChatPrompt(body: Record<string, unknown>): string {
-    const prompt = requireString(body.prompt, "prompt");
-    if (body.promptType !== "product-assistant") return prompt;
-
-    return PRODUCT_ASSISTANT_PROMPT
-      .replace("{{scope}}", this.buildProductAssistantScope(body.pageContext))
-      .replace("{{context}}", this.buildProductAssistantContext(body.pageContext))
-      .replace("{{question}}", prompt);
-  }
-
-  private buildProductAssistantScope(pageContext: unknown): string {
-    const context = this.isRecord(pageContext) ? pageContext : {};
-    const filters = this.isRecord(context.filters) ? context.filters : {};
-    const aiParams = this.isRecord(context.aiParams) ? context.aiParams : {};
-
-    return [
-      `dt_type：${this.text(aiParams.dt_type) || this.text(filters.dateTypeText)}`,
-      `dt：${this.text(aiParams.dt)}`,
-      `dt_start：${this.text(aiParams.dt_start)}`,
-      `dt_end：${this.text(aiParams.dt_end)}`,
-      `结构标签：${this.text(aiParams.tab_select) || this.text(filters.tabSelect) || "营收结构"}`,
-      `维度：${this.text(aiParams.channel_type) || this.text(filters.channelType) || "品类"}`,
-      `当前选中项：${this.text(aiParams.channel_value) || this.text(filters.channelValue) || "全部"}`,
-    ].join("\n");
-  }
-
-  private buildProductAssistantContext(pageContext: unknown): string {
-    if (!this.isRecord(pageContext) || !this.isRecord(pageContext.aiOverview)) return "暂无。";
-    const aiOverview = pageContext.aiOverview;
-    const lines = [
-      this.text(aiOverview.summary),
-      ...this.textList(aiOverview.bullets),
-      ...this.textList(aiOverview.risks).map((item) => `风险：${item}`),
-      ...this.textList(aiOverview.suggestions).map((item) => `建议：${item}`),
-      !this.text(aiOverview.summary) ? this.text(aiOverview.text) : "",
-    ].filter(Boolean);
-
-    return lines.length ? lines.join("\n") : "暂无。";
-  }
-
-  private text(value: unknown): string {
-    return typeof value === "string" ? value.trim() : "";
-  }
-
-  private textList(value: unknown): string[] {
-    return Array.isArray(value) ? value.map((item) => this.text(item)).filter(Boolean) : [];
-  }
-
-  private isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null;
   }
 
   private resolveApiTenant(input: { workspace?: string; userId?: string }) {

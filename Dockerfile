@@ -11,8 +11,8 @@ RUN sed -i 's#https://dl-cdn.alpinelinux.org/alpine#https://mirrors.aliyun.com/a
     && apk add --no-cache python3
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
-ENV PORT=7171
+ENV PORT=8090
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-EXPOSE 7171
+EXPOSE 8090
 CMD ["npm", "run", "server"]

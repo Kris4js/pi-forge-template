@@ -52,7 +52,7 @@ export type ChatOptions = {
   onToolEvent?: (event: ToolStreamEvent) => void;
 };
 
-export type ChatOnceInput = ChatOptions & {
+export type ChatInput = ChatOptions & {
   prompt: string;
 };
 
@@ -62,23 +62,4 @@ export type ChatResult = {
   workspace: string;
   userId: string;
   retention?: RetentionInfo;
-};
-
-export type MemoryKind = "fact" | "preference" | "task";
-export type MemoryVisibility = "session" | "user" | "workspace";
-export type MemorySource = "agent" | "user" | "summary" | "system" | "skill";
-
-export type MemoryRecord = {
-  id: string;
-  workspace: string;
-  userId: string;
-  sessionId: string;
-  visibility: MemoryVisibility;
-  kind: MemoryKind;
-  text: string;
-  keywords: string[];
-  createdAt: number;
-  lastUsedAt: number;
-  source: MemorySource;
-  confidence: number;
 };

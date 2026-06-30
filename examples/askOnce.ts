@@ -1,4 +1,4 @@
-import { MinipiAgentRuntime } from "../src/index.js";
+import { PiAgentRuntime } from "../src/index.js";
 import { parseCliOptions, printCommonHelp, resolveSinglePrompt } from "./cliUtils.js";
 
 const options = parseCliOptions(process.argv.slice(2));
@@ -14,10 +14,10 @@ if (!prompt) {
   process.exit(1);
 }
 
-const runtime = new MinipiAgentRuntime({ workspace: options.workspace, userId: options.userId });
+const runtime = new PiAgentRuntime({ workspace: options.workspace, userId: options.userId });
 
 try {
-  const result = await runtime.chatOnce({
+  const result = await runtime.chat({
     prompt,
     userId: options.userId,
     sessionId: options.sessionId,

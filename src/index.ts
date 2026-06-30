@@ -1,25 +1,22 @@
-export { MinipiAgentRuntime } from "./runtime/agentRuntime.js";
-export { createMinipiRuntime } from "./runtime/sessionFactory.js";
-export type { RuntimeOptions } from "./runtime/sessionFactory.js";
-export { AgentRuntimeConfig } from "./runtime/config.js";
+export { PiAgentRuntime } from "./agent/runtime.js";
+export type { RuntimeOptions } from "./agent/runtime.js";
+export { AgentRuntimeConfig } from "./agent/config.js";
 export {
   DEFAULT_USER_ID,
   DEFAULT_WORKSPACE,
   normalizeTenantSegment,
   resolveTenantIdentity,
   shouldRequireUserIdFromEnv,
-} from "./runtime/tenant.js";
-export { JsonMemoryStore } from "./memory/store.js";
+} from "./workspace/tenant.js";
 export {
   resolveWorkspacePaths,
   ensureWorkspaceDirs,
   getDefaultWorkspaceRootDir,
-} from "./runtime/workspace.js";
+} from "./workspace/paths.js";
 export type {
-  ChatOnceInput,
+  ChatInput,
   ChatOptions,
   ChatResult,
-  MemoryRecord,
   RetentionInfo,
   TenantIdentity,
   TenantIdentityInput,

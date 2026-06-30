@@ -3,12 +3,12 @@ services:
     build: .
     image: pi-agent-service:latest
     ports:
-      - "7171:7171"
+      - "8090:8090"
     env_file:
       - .env
     environment:
       HOST: 0.0.0.0
-      PORT: 7171
+      PORT: 8090
     volumes:
       - ./.workspaces:/app/.workspaces
     restart: unless-stopped

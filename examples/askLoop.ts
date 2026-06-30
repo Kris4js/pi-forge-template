@@ -1,6 +1,6 @@
 import { createInterface } from "node:readline";
 import { stdin, stdout } from "node:process";
-import { MinipiAgentRuntime } from "../src/index.js";
+import { PiAgentRuntime } from "../src/index.js";
 import { isEndSignal, parseCliOptions, printCommonHelp } from "./cliUtils.js";
 
 const options = parseCliOptions(process.argv.slice(2));
@@ -10,7 +10,7 @@ if (options.help) {
   process.exit(0);
 }
 
-const runtime = new MinipiAgentRuntime({ workspace: options.workspace, userId: options.userId });
+const runtime = new PiAgentRuntime({ workspace: options.workspace, userId: options.userId });
 const rl = createInterface({
   input: stdin,
   output: stdout,
@@ -40,7 +40,7 @@ if (stdin.isTTY) rl.setPrompt("你 > ");
 
 try {
   if (options.prompt) {
-    await chatOnce(options.prompt);
+    await chat(options.prompt);
   }
 
   if (stdin.isTTY) rl.prompt();
@@ -55,7 +55,7 @@ try {
     }
 
     if (prompt) {
-      await chatOnce(prompt);
+      await chat(prompt);
     }
 
     if (stdin.isTTY) rl.prompt();
@@ -66,10 +66,11 @@ try {
 
 console.log("loop closed");
 
-async function chatOnce(prompt: string) {
+async function chat(prompt: string) {
   try {
     stdout.write("AI > ");
-    const result = await runtime.chat(prompt, {
+    const result = await runtime.chat({
+      prompt,
       userId: options.userId,
       sessionId,
       stream: options.stream,
