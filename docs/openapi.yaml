@@ -1,0 +1,824 @@
+openapi: 3.1.0
+info:
+  title: Mini-pi Runtime HTTP API
+  version: 0.1.0
+  description: |
+    Mini-pi 的最小 Runtime HTTP API。
+
+    这份文档严格对应当前服务端实现 `src/server/app.ts`。
+    服务默认监听 `http://localhost:7171`。
+servers:
+  - url: http://localhost:7171
+tags:
+  - name: Runtime
+    description: 运行时状态与对话
+  - name: Session
+    description: 会话选择与创建
+  - name: Model
+    description: 模型配置
+  - name: ProductLeading
+    description: 产品领先业务 AI 能力
+paths:
+  /api/state:
+    get:
+      tags:
+        - Runtime
+      operationId: getState
+      summary: 获取当前 workspace 的运行时快照
+      parameters:
+        - in: query
+          name: workspace
+          required: false
+          description: workspace 名称，默认值为 demo
+          schema:
+            type: string
+            default: demo
+        - in: query
+          name: userId
+          required: false
+          description: 用户身份。默认 anonymous 仅用于兼容旧客户端；设置 MINIPI_REQUIRE_USER_ID=true 后必填
+          schema:
+            type: string
+            default: anonymous
+      responses:
+        "200":
+          description: 当前状态
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StateResponse"
+        "500":
+          description: 服务端错误
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/chat:
+    post:
+      tags:
+        - Runtime
+      operationId: chatRuntime
+      summary: 框架级单次输入/输出对话 API
+      description: |
+        单次请求接口。
+        - `stream` 默认为 `true`，默认响应为 Server-Sent Events（SSE）。
+        - 设置 `stream=false` 时返回普通 JSON。每次请求只需提供一次用户输入；如需调试运行时状态，可设置 `includeSnapshot=true`。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatRequest"
+      responses:
+        "200":
+          description: 单次对话输出；默认 `text/event-stream`，`stream=false` 时为 `application/json`
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: |
+                  SSE 事件流：
+                  - `event: start`，数据为 `{ "ok": true }`
+                  - `event: delta`，数据为 `{ "delta": "..." }`
+                  - `event: tool_start`，数据为 `ToolStartEvent`
+                  - `event: tool_update`，数据为 `ToolUpdateEvent`
+                  - `event: tool_end`，数据为 `ToolEndEvent`
+                  - `event: done`，数据为 `ChatResponse`
+                  - `event: error`，数据为 `ErrorResponse`
+              examples:
+                stream:
+                  summary: SSE 文本片段
+                  value: |
+                    event: start
+                    data: {"ok":true}
+
+                    event: delta
+                    data: {"delta":"你好"}
+
+                    event: tool_start
+                    data: {"type":"tool_start","toolCallId":"...","toolName":"read","args":{"path":"README.md"}}
+
+                    event: tool_end
+                    data: {"type":"tool_end","toolCallId":"...","toolName":"read","result":{},"isError":false}
+
+                    event: done
+                    data: {"ok":true,"output":{"sessionId":"...","text":"你好","workspace":"demo"}}
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatResponse"
+        "400":
+          description: 请求缺少必填 prompt
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: 服务端错误或模型调用失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/product-leading/ai-overview:
+    post:
+      tags:
+        - ProductLeading
+      operationId: getProductLeadingAiOverview
+      summary: 生成产品领先 AI 速览
+      description: |
+        面向前端 `src/views/analysis/product/modules/Content.vue` 的 AI 速览接口。
+        服务端按用户维度、时间维度、结构筛选维度写入文件缓存：
+        `.workspaces/product/cache/product-leading-ai-overview/<userId>/<cacheKey>.json`。
+
+        默认缓存 TTL：月度 6 小时，日度/自定义 30 分钟；可通过 `PRODUCT_LEADING_AI_CACHE_TTL_MS` 覆盖。
+        `forceRefresh=true` 时跳过缓存并重新调用 Runtime 生成。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductLeadingAiOverviewRequest"
+      responses:
+        "200":
+          description: AI 速览结果
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductLeadingAiOverviewResponse"
+        "500":
+          description: 服务端错误或模型调用失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/session/select:
+    post:
+      tags:
+        - Session
+      operationId: selectSession
+      summary: 切换当前 workspace 的活动会话
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SessionSelectRequest"
+      responses:
+        "200":
+          description: 切换后的快照
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionSnapshotResponse"
+        "500":
+          description: 服务端错误或会话不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/session/new:
+    post:
+      tags:
+        - Session
+      operationId: createSession
+      summary: 创建新会话并切换到该会话
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SessionNewRequest"
+      responses:
+        "200":
+          description: 新建成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionNewResponse"
+        "500":
+          description: 服务端错误
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/model-config:
+    post:
+      tags:
+        - Model
+      operationId: setModelConfig
+      summary: 设置当前 workspace 的模型配置
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ModelConfigRequest"
+      responses:
+        "200":
+          description: 设置完成后的快照
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionSnapshotResponse"
+        "500":
+          description: 服务端错误或模型不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+components:
+  schemas:
+    StateResponse:
+      type: object
+      required:
+        - ok
+        - snapshot
+        - workspaces
+        - modelCatalog
+      properties:
+        ok:
+          type: boolean
+          const: true
+        snapshot:
+          $ref: "#/components/schemas/Snapshot"
+        workspaces:
+          type: array
+          items:
+            type: string
+        modelCatalog:
+          type: array
+          items:
+            $ref: "#/components/schemas/ModelCatalogItem"
+    ChatRequest:
+      type: object
+      required:
+        - prompt
+      properties:
+        workspace:
+          type: string
+          description: workspace 名称，默认值为 demo
+        userId:
+          type: string
+          default: anonymous
+          description: 用户身份。默认 anonymous 仅用于兼容旧客户端；设置 MINIPI_REQUIRE_USER_ID=true 后必填
+        sessionId:
+          type: string
+          description: 指定会话 ID，不传则使用当前活动会话
+        prompt:
+          type: string
+          minLength: 1
+          description: 单次用户输入
+        stream:
+          type: boolean
+          default: true
+          description: 是否使用 SSE 流式输出；默认 true。设置为 false 时返回普通 JSON
+        includeSnapshot:
+          type: boolean
+          default: false
+          description: 是否在完成响应中附带最新运行时快照，默认不返回
+    ChatResponse:
+      type: object
+      required:
+        - ok
+        - output
+      properties:
+        ok:
+          type: boolean
+          const: true
+        output:
+          $ref: "#/components/schemas/ChatResult"
+        snapshot:
+          $ref: "#/components/schemas/Snapshot"
+    ProductLeadingAiOverviewRequest:
+      type: object
+      properties:
+        workspace:
+          type: string
+          default: product
+          description: Runtime workspace，产品领先固定使用 product
+        userId:
+          type: string
+          description: 用户维度缓存 key，前端建议传当前登录 username
+        username:
+          type: string
+          description: 用户展示名，可选
+        forceRefresh:
+          type: boolean
+          default: false
+          description: 是否跳过文件缓存并重新生成
+        dt_type:
+          type: string
+          enum: [月度, 日度, 自定义]
+          description: 时间类型
+        dt:
+          type: string
+          description: 月度 YYYY-MM；日度 YYYY-MM-DD；自定义为空字符串
+        dt_start:
+          type: string
+          description: 自定义开始日期 YYYY-MM-DD；非自定义为空字符串
+        dt_end:
+          type: string
+          description: 自定义结束日期 YYYY-MM-DD；非自定义为空字符串
+        tab_select:
+          type: string
+          enum: [营收结构, 利润结构]
+          description: 当前结构标签
+        channel_type:
+          type: string
+          enum: [品类, 战略品, 超净货盘]
+          description: 当前结构维度
+        channel_value:
+          type: string
+          description: 当前选中的结构项，未选为空字符串
+    ProductLeadingAiOverviewResponse:
+      type: object
+      required:
+        - ok
+        - data
+      properties:
+        ok:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/ProductLeadingAiOverviewData"
+    ProductLeadingAiOverviewData:
+      type: object
+      required:
+        - title
+        - summary
+        - bullets
+        - risks
+        - suggestions
+        - text
+        - cached
+        - cacheKey
+        - generatedAt
+        - expiresAt
+        - userId
+        - params
+      properties:
+        title:
+          type: string
+        summary:
+          type: string
+          description: 不超过 60 字的总览结论
+        bullets:
+          type: array
+          items:
+            type: string
+        risks:
+          type: array
+          items:
+            type: string
+        suggestions:
+          type: array
+          items:
+            type: string
+        text:
+          type: string
+          description: 模型原始输出文本
+        cached:
+          type: boolean
+          description: 是否命中文件缓存
+        cacheKey:
+          type: string
+        generatedAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+        userId:
+          type: string
+        params:
+          $ref: "#/components/schemas/ProductLeadingAiOverviewRequest"
+    SessionSelectRequest:
+      type: object
+      properties:
+        workspace:
+          type: string
+          description: workspace 名称，默认值为 demo
+        userId:
+          type: string
+          default: anonymous
+          description: 用户身份。默认 anonymous 仅用于兼容旧客户端；设置 MINIPI_REQUIRE_USER_ID=true 后必填
+        sessionId:
+          type: string
+          description: 目标会话 ID
+    SessionNewRequest:
+      type: object
+      properties:
+        workspace:
+          type: string
+          description: workspace 名称，默认值为 demo
+        userId:
+          type: string
+          default: anonymous
+          description: 用户身份。默认 anonymous 仅用于兼容旧客户端；设置 MINIPI_REQUIRE_USER_ID=true 后必填
+    SessionNewResponse:
+      type: object
+      required:
+        - ok
+        - sessionId
+        - snapshot
+      properties:
+        ok:
+          type: boolean
+          const: true
+        sessionId:
+          type: string
+        snapshot:
+          $ref: "#/components/schemas/Snapshot"
+    SessionSnapshotResponse:
+      type: object
+      required:
+        - ok
+        - snapshot
+      properties:
+        ok:
+          type: boolean
+          const: true
+        snapshot:
+          $ref: "#/components/schemas/Snapshot"
+    ModelConfigRequest:
+      type: object
+      properties:
+        workspace:
+          type: string
+          description: workspace 名称，默认值为 demo
+        provider:
+          type: string
+          description: 模型提供商名称
+        modelId:
+          type: string
+          description: 模型 ID
+        thinkingLevel:
+          $ref: "#/components/schemas/ThinkingLevel"
+        apiKey:
+          type: string
+          description: 运行时 API Key，仅本次运行时内有效
+    ChatResult:
+      type: object
+      required:
+        - sessionId
+        - text
+        - workspace
+        - userId
+      properties:
+        sessionId:
+          type: string
+        text:
+          type: string
+        workspace:
+          type: string
+        userId:
+          type: string
+        retention:
+          $ref: "#/components/schemas/RetentionCheckResult"
+    Snapshot:
+      type: object
+      required:
+        - tenant
+        - workspace
+        - session
+        - prompts
+        - retention
+        - sessions
+        - memories
+        - summaries
+      properties:
+        tenant:
+          $ref: "#/components/schemas/TenantInfo"
+        paths:
+          $ref: "#/components/schemas/WorkspacePaths"
+        workspace:
+          $ref: "#/components/schemas/WorkspacePaths"
+        session:
+          $ref: "#/components/schemas/SessionInfo"
+        provider:
+          $ref: "#/components/schemas/ProviderInfo"
+        prompts:
+          $ref: "#/components/schemas/PromptInfo"
+        retention:
+          $ref: "#/components/schemas/RetentionInspection"
+        sessions:
+          type: array
+          items:
+            $ref: "#/components/schemas/SessionListItem"
+        memories:
+          type: array
+          items:
+            $ref: "#/components/schemas/MemorySummary"
+        summaries:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConversationSummary"
+    TenantInfo:
+      type: object
+      required:
+        - workspace
+        - userId
+        - sessionId
+      properties:
+        workspace:
+          type: string
+        userId:
+          type: string
+        sessionId:
+          type: string
+    WorkspacePaths:
+      type: object
+      required:
+        - rootDir
+        - workspace
+        - userId
+        - workspaceDir
+        - userDir
+        - sharedDir
+        - agentDir
+        - sessionDir
+        - memoryFile
+        - userMemoryFile
+        - workspaceMemoryFile
+        - summaryFile
+        - cwd
+      properties:
+        rootDir:
+          type: string
+        workspace:
+          type: string
+        userId:
+          type: string
+        workspaceDir:
+          type: string
+        userDir:
+          type: string
+        sharedDir:
+          type: string
+        agentDir:
+          type: string
+        sessionDir:
+          type: string
+        memoryFile:
+          type: string
+          description: Alias of userMemoryFile for backward compatibility
+        userMemoryFile:
+          type: string
+        workspaceMemoryFile:
+          type: string
+        summaryFile:
+          type: string
+        cwd:
+          type: string
+    SessionInfo:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+        file:
+          type: string
+        name:
+          type: string
+    ProviderInfo:
+      type: object
+      required:
+        - provider
+        - modelId
+        - name
+        - contextWindow
+        - thinkingLevel
+      properties:
+        provider:
+          type: string
+        modelId:
+          type: string
+        name:
+          type: string
+        contextWindow:
+          type: integer
+        thinkingLevel:
+          $ref: "#/components/schemas/ThinkingLevel"
+    PromptInfo:
+      type: object
+      required:
+        - systemPrompt
+      properties:
+        systemPrompt:
+          type: string
+    SessionListItem:
+      type: object
+      required:
+        - id
+        - path
+      properties:
+        id:
+          type: string
+        path:
+          type: string
+        name:
+          type: string
+    MemorySummary:
+      type: object
+      required:
+        - id
+        - visibility
+        - kind
+        - text
+        - confidence
+        - createdAt
+        - lastUsedAt
+      properties:
+        id:
+          type: string
+        visibility:
+          $ref: "#/components/schemas/MemoryVisibility"
+        kind:
+          $ref: "#/components/schemas/MemoryKind"
+        text:
+          type: string
+        confidence:
+          type: number
+          format: float
+        createdAt:
+          type: integer
+          description: Unix 毫秒时间戳
+        lastUsedAt:
+          type: integer
+          description: Unix 毫秒时间戳
+    ConversationSummary:
+      type: object
+      required:
+        - id
+        - text
+        - turnStart
+        - turnEnd
+        - createdAt
+        - lastUsedAt
+      properties:
+        id:
+          type: string
+        text:
+          type: string
+        turnStart:
+          type: integer
+        turnEnd:
+          type: integer
+        createdAt:
+          type: integer
+          description: Unix 毫秒时间戳
+        lastUsedAt:
+          type: integer
+          description: Unix 毫秒时间戳
+        promotedToMemoryId:
+          type: string
+    ModelCatalogItem:
+      type: object
+      required:
+        - provider
+        - modelId
+        - name
+        - contextWindow
+        - authConfigured
+      properties:
+        provider:
+          type: string
+        modelId:
+          type: string
+        name:
+          type: string
+        contextWindow:
+          type: integer
+        authConfigured:
+          type: boolean
+    RetentionInspection:
+      type: object
+      required:
+        - estimatedTokens
+        - shouldCompact
+        - tokenThresholdRatio
+        - summaryMaxAgeDays
+      properties:
+        estimatedTokens:
+          type: integer
+        contextWindow:
+          type: integer
+        percent:
+          type: number
+          format: float
+        shouldCompact:
+          type: boolean
+        reason:
+          $ref: "#/components/schemas/RetentionReason"
+        lastCompactionAt:
+          type: integer
+          description: Unix 毫秒时间戳
+        tokenThresholdRatio:
+          type: number
+          format: float
+        summaryMaxAgeDays:
+          type: integer
+    RetentionCheckResult:
+      type: object
+      required:
+        - compacted
+        - estimatedTokens
+      properties:
+        compacted:
+          type: boolean
+        reason:
+          $ref: "#/components/schemas/RetentionReason"
+        estimatedTokens:
+          type: integer
+        contextWindow:
+          type: integer
+    MemoryKind:
+      type: string
+      enum:
+        - fact
+        - preference
+        - task
+    MemoryVisibility:
+      type: string
+      enum:
+        - session
+        - user
+        - workspace
+    RetentionReason:
+      type: string
+      enum:
+        - tokens
+        - age
+    ThinkingLevel:
+      type: string
+      enum:
+        - off
+        - minimal
+        - low
+        - medium
+        - high
+        - xhigh
+    ToolStartEvent:
+      type: object
+      required:
+        - type
+        - toolCallId
+        - toolName
+        - args
+      properties:
+        type:
+          type: string
+          const: tool_start
+        toolCallId:
+          type: string
+        toolName:
+          type: string
+        args: {}
+    ToolUpdateEvent:
+      type: object
+      required:
+        - type
+        - toolCallId
+        - toolName
+        - args
+        - partialResult
+      properties:
+        type:
+          type: string
+          const: tool_update
+        toolCallId:
+          type: string
+        toolName:
+          type: string
+        args: {}
+        partialResult: {}
+    ToolEndEvent:
+      type: object
+      required:
+        - type
+        - toolCallId
+        - toolName
+        - result
+        - isError
+      properties:
+        type:
+          type: string
+          const: tool_end
+        toolCallId:
+          type: string
+        toolName:
+          type: string
+        result: {}
+        isError:
+          type: boolean
+    ErrorResponse:
+      type: object
+      required:
+        - ok
+        - error
+      properties:
+        ok:
+          type: boolean
+          const: false
+        error:
+          type: string

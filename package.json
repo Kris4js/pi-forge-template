@@ -1,0 +1,22 @@
+{
+  "name": "pi-agent-service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "demo": "node node_modules/tsx/dist/cli.mjs examples/demo.ts",
+    "chat:once": "node node_modules/tsx/dist/cli.mjs examples/askOnce.ts",
+    "chat:loop": "node node_modules/tsx/dist/cli.mjs examples/askLoop.ts",
+    "test:memory": "node node_modules/tsx/dist/cli.mjs examples/memoryIsolationTest.ts",
+    "check": "node node_modules/typescript/lib/tsc.js --noEmit",
+    "server": "node node_modules/tsx/dist/cli.mjs src/server/app.ts"
+  },
+  "dependencies": {
+    "@mariozechner/pi-coding-agent": "^0.66.1",
+    "@sinclair/typebox": "^0.34.41"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.3",
+    "typescript": "^5.7.3"
+  }
+}

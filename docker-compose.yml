@@ -1,0 +1,14 @@
+services:
+  pi-agent-service:
+    build: .
+    image: pi-agent-service:latest
+    ports:
+      - "7171:7171"
+    env_file:
+      - .env
+    environment:
+      HOST: 0.0.0.0
+      PORT: 7171
+    volumes:
+      - ./.workspaces:/app/.workspaces
+    restart: unless-stopped
