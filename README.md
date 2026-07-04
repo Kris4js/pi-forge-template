@@ -1,12 +1,14 @@
 # Pi Agent Service
 
-Reusable Pi-based agent runtime service copied from `wanjiale/bi-pi-agent` and renamed for use as the generic agent service in this repo.
+Reusable Pi-based agent runtime service for use as the generic agent service.
 
 ## Install
 
 ```bash
 npm install
 ```
+
+This service depends on the maintained `@earendil-works/pi-coding-agent` package.
 
 ## Run API Server
 
@@ -29,7 +31,7 @@ docker compose up -d --build pi-agent-service
 
 The service stores workspace runtime state under `.workspaces`.
 
-## HTTP API
+## API
 
 ```bash
 GET  /api/state?workspace=demo
@@ -65,3 +67,5 @@ PI_MODEL_API_KEY=...
 ```
 
 Provider-specific keys like `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and `GEMINI_API_KEY` are also picked up automatically.
+
+The service reads `.env` from the project root by default, so runtime workspace directory changes do not hide model credentials.

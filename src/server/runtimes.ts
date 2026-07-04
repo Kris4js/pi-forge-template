@@ -3,6 +3,7 @@ import { PiAgentRuntime, resolveWorkspacePaths } from "../index.js";
 type RuntimeCacheEntry = {
   workspace: string;
   userId: string;
+  agentName: string;
   runtime: PiAgentRuntime;
   lastUsedAt: number;
   activeRequests: number;
@@ -28,6 +29,7 @@ export class RuntimeManager {
   async runChatRequest(input: {
     workspace: string;
     userId: string;
+    agentName?: string;
     prompt: string;
     sessionId?: string;
     stream: boolean;
@@ -38,6 +40,7 @@ export class RuntimeManager {
       return runtime.chat({
         prompt: input.prompt,
         userId: input.userId,
+        agentName: input.agentName,
         sessionId,
         stream: input.stream,
         onTextDelta: input.onTextDelta,
@@ -46,17 +49,17 @@ export class RuntimeManager {
     };
 
     if (!input.sessionId) {
-      const output = await this.withNewSessionRuntime(input.workspace, input.userId, (runtime, sessionId) => run(runtime, sessionId));
+      const output = await this.withNewSessionRuntime(input.workspace, input.userId, input.agentName, (runtime, sessionId) => run(runtime, sessionId));
       return { output };
     }
 
     try {
-      const output = await this.withRuntime(input.workspace, input.userId, input.sessionId, (runtime) => run(runtime, input.sessionId));
+      const output = await this.withRuntime(input.workspace, input.userId, input.agentName, input.sessionId, (runtime) => run(runtime, input.sessionId));
       return { output };
     } catch (error) {
       if (!this.isSessionNotFoundError(error)) throw error;
-      await this.disposeRuntimeEntry(input.workspace, input.userId, input.sessionId);
-      const output = await this.withNewSessionRuntime(input.workspace, input.userId, (runtime, sessionId) => run(runtime, sessionId));
+      await this.disposeRuntimeEntry(input.workspace, input.userId, input.agentName, input.sessionId);
+      const output = await this.withNewSessionRuntime(input.workspace, input.userId, input.agentName, (runtime, sessionId) => run(runtime, sessionId));
       return {
         output,
         recoveredSession: true,
@@ -68,22 +71,25 @@ export class RuntimeManager {
   async withNewSessionRuntime<T>(
     workspace: string,
     userId: string,
+    agentName: string | undefined,
     fn: (runtime: PiAgentRuntime, sessionId: string) => Promise<T>,
   ): Promise<T> {
     const normalizedWorkspace = this.normalizeWorkspaceKey(workspace);
     const normalizedUserId = this.normalizeUserIdKey(userId);
+    const normalizedAgentName = this.normalizeAgentNameKey(agentName, normalizedWorkspace);
 
     const entry: RuntimeCacheEntry = {
       workspace: normalizedWorkspace,
       userId: normalizedUserId,
-      runtime: new PiAgentRuntime({ workspace: normalizedWorkspace, userId: normalizedUserId }),
+      agentName: normalizedAgentName,
+      runtime: new PiAgentRuntime({ workspace: normalizedWorkspace, userId: normalizedUserId, agentName: normalizedAgentName }),
       lastUsedAt: Date.now(),
       activeRequests: 1,
     };
     let registeredKey: string | undefined;
     try {
       const sessionId = await entry.runtime.newSession();
-      registeredKey = this.makeRuntimeKey(normalizedWorkspace, normalizedUserId, sessionId);
+      registeredKey = this.makeRuntimeKey(normalizedWorkspace, normalizedUserId, normalizedAgentName, sessionId);
       this.runtimes.set(registeredKey, entry);
       return await fn(entry.runtime, sessionId);
     } catch (error) {
@@ -98,10 +104,11 @@ export class RuntimeManager {
   async withRuntime<T>(
     workspace: string,
     userId: string,
+    agentName: string | undefined,
     sessionId: string | undefined,
     fn: (runtime: PiAgentRuntime) => Promise<T>,
   ): Promise<T> {
-    const entry = this.getRuntimeEntry(workspace, userId, sessionId);
+    const entry = this.getRuntimeEntry(workspace, userId, agentName, sessionId);
     entry.activeRequests += 1;
     entry.lastUsedAt = Date.now();
     try {
@@ -138,16 +145,22 @@ export class RuntimeManager {
     return resolveWorkspacePaths({ workspace: workspace || "demo" }).workspace;
   }
 
-  private getRuntimeEntry(workspace: string, userId: string, sessionId?: string): RuntimeCacheEntry {
+  normalizeAgentNameKey(agentName: string | undefined, workspace = "demo"): string {
+    return resolveWorkspacePaths({ workspace: agentName || workspace || "demo" }).workspace;
+  }
+
+  private getRuntimeEntry(workspace: string, userId: string, agentName: string | undefined, sessionId?: string): RuntimeCacheEntry {
     const normalizedWorkspace = this.normalizeWorkspaceKey(workspace);
     const normalizedUserId = this.normalizeUserIdKey(userId);
-    const key = this.makeRuntimeKey(normalizedWorkspace, normalizedUserId, sessionId);
+    const normalizedAgentName = this.normalizeAgentNameKey(agentName, normalizedWorkspace);
+    const key = this.makeRuntimeKey(normalizedWorkspace, normalizedUserId, normalizedAgentName, sessionId);
     let entry = this.runtimes.get(key);
     if (!entry) {
       entry = {
         workspace: normalizedWorkspace,
         userId: normalizedUserId,
-        runtime: new PiAgentRuntime({ workspace: normalizedWorkspace, userId: normalizedUserId }),
+        agentName: normalizedAgentName,
+        runtime: new PiAgentRuntime({ workspace: normalizedWorkspace, userId: normalizedUserId, agentName: normalizedAgentName }),
         lastUsedAt: Date.now(),
         activeRequests: 0,
       };
@@ -156,17 +169,22 @@ export class RuntimeManager {
     return entry;
   }
 
-  private async disposeRuntimeEntry(workspace: string, userId: string, sessionId?: string): Promise<void> {
-    const key = this.makeRuntimeKey(this.normalizeWorkspaceKey(workspace), this.normalizeUserIdKey(userId), sessionId);
+  private async disposeRuntimeEntry(workspace: string, userId: string, agentName: string | undefined, sessionId?: string): Promise<void> {
+    const key = this.makeRuntimeKey(
+      this.normalizeWorkspaceKey(workspace),
+      this.normalizeUserIdKey(userId),
+      this.normalizeAgentNameKey(agentName, workspace),
+      sessionId,
+    );
     const entry = this.runtimes.get(key);
     if (!entry) return;
     this.runtimes.delete(key);
     if (entry.activeRequests <= 0) await entry.runtime.dispose().catch(() => undefined);
   }
 
-  private makeRuntimeKey(workspace: string, userId: string, sessionId?: string): string {
+  private makeRuntimeKey(workspace: string, userId: string, agentName: string, sessionId?: string): string {
     const sessionKey = sessionId?.trim();
-    const tenantKey = `${workspace}:user:${userId}`;
+    const tenantKey = `${workspace}:user:${userId}:agent:${agentName}`;
     return sessionKey ? `${tenantKey}:session:${sessionKey}` : `${tenantKey}:active`;
   }
 

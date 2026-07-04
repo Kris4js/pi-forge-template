@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { estimateTokens, getLatestCompactionEntry, type AgentSessionRuntime } from "@mariozechner/pi-coding-agent";
+import { estimateTokens, getLatestCompactionEntry, type AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 
 export type RetentionPolicy = {
   tokenThresholdRatio?: number;
@@ -48,7 +48,12 @@ export async function enforceRetentionPolicy(
   );
 
   await saveMetadata(metadataFile, { lastCompactionAt: Date.now() });
-  return { compacted: true, reason, estimatedTokens: inspection.estimatedTokens, contextWindow: inspection.contextWindow };
+  return {
+    compacted: true,
+    reason,
+    estimatedTokens: inspection.estimatedTokens,
+    contextWindow: inspection.contextWindow,
+  };
 }
 
 export async function inspectRetentionPolicy(
@@ -75,7 +80,8 @@ export async function inspectRetentionPolicy(
   const lastCompactionAt = latestCompaction ? Date.parse(latestCompaction.timestamp) : metadata.lastCompactionAt;
   const now = Date.now();
   const tokenOverflow = Boolean(contextWindow && estimatedTokens / contextWindow >= tokenThresholdRatio);
-  const expired = lastCompactionAt === undefined ? false : now - lastCompactionAt >= summaryMaxAgeDays * 24 * 60 * 60 * 1000;
+  const expired =
+    lastCompactionAt === undefined ? false : now - lastCompactionAt >= summaryMaxAgeDays * 24 * 60 * 60 * 1000;
   const shouldCompact = tokenOverflow || expired;
   const reason = tokenOverflow ? "tokens" : expired ? "age" : undefined;
 

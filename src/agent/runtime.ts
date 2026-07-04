@@ -8,7 +8,7 @@ import {
   SettingsManager,
   type AgentSessionRuntime,
   type CreateAgentSessionRuntimeFactory,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import { collectAssistantText, toToolStreamEvent } from "./events.js";
 import {
   enforceRetentionPolicy,
@@ -19,12 +19,15 @@ import {
 import {
   ensureWorkspaceDirs,
   listWorkspaceNames,
+  normalizeAgentName,
   resolveWorkspacePaths,
   type WorkspaceOptions,
   type WorkspacePaths,
 } from "../workspace/paths.js";
+import { bootstrapAgentWorkspace } from "./bootstrap.js";
 import { AgentRuntimeConfig } from "./config.js";
 import { buildSystemPrompt } from "../prompt/system.js";
+import { getKanbanCreatorToolPrompt, getKanbanCreatorTools } from "../tools/kanban-creator/index.js";
 import type {
   ChatInput,
   ChatOptions,
@@ -36,6 +39,8 @@ export type RuntimeOptions = WorkspaceOptions & {
   agentDir?: string;
   sessionDir?: string;
   envFilePath?: string;
+  agentName?: string;
+  skillsSourceDir?: string;
 };
 
 export class PiAgentRuntime {
@@ -271,6 +276,12 @@ async function createPiRuntime(
 }> {
   const workspace = resolveWorkspacePaths(options);
   await ensureWorkspaceDirs(workspace);
+  await bootstrapAgentWorkspace({
+    agentName: options.agentName,
+    workspace,
+    skillsSourceDir: options.skillsSourceDir,
+  });
+  const agentName = normalizeAgentName(options.agentName ?? workspace.workspace);
   const cwd = options.cwd ?? workspace.cwd;
   const agentDir = options.agentDir ?? workspace.agentDir;
   const sessionDir = options.sessionDir ?? workspace.sessionDir;
@@ -289,12 +300,15 @@ async function createPiRuntime(
       resourceLoaderOptions: {
         noExtensions: true,
         noSkills: true,
+        additionalSkillPaths: [join(workspace.workspaceDir, ".pi", "skills")],
         noPromptTemplates: true,
         noThemes: true,
         systemPromptOverride: () =>
           buildSystemPrompt({
             workspace: workspace.workspace,
             userId: workspace.userId,
+            agentName,
+            toolPrompt: getKanbanCreatorToolPrompt(agentName),
             workspaceAgents,
           }),
       },
@@ -305,6 +319,7 @@ async function createPiRuntime(
         services,
         sessionManager,
         sessionStartEvent,
+        customTools: getKanbanCreatorTools(agentName),
       })),
       services,
       diagnostics: services.diagnostics,

@@ -16,7 +16,7 @@ export class ApiRouter {
         workspace: url.searchParams.get("workspace") ?? "demo",
         userId: url.searchParams.get("userId") ?? undefined,
       });
-      await this.options.runtimeManager.withRuntime(tenant.workspace, tenant.userId, undefined, async (runtime) => {
+      await this.options.runtimeManager.withRuntime(tenant.workspace, tenant.userId, undefined, undefined, async (runtime) => {
         const snapshot = await runtime.getSnapshot();
         const workspaces = await runtime.listWorkspaces();
         const modelCatalog = await runtime.getModelCatalog();
@@ -36,7 +36,7 @@ export class ApiRouter {
         workspace: String(body.workspace ?? "demo"),
         userId: typeof body.userId === "string" ? body.userId : undefined,
       });
-      await this.options.runtimeManager.withRuntime(tenant.workspace, tenant.userId, undefined, async (runtime) => {
+      await this.options.runtimeManager.withRuntime(tenant.workspace, tenant.userId, undefined, undefined, async (runtime) => {
         await runtime.selectSession(String(body.sessionId ?? ""));
         const snapshot = await runtime.getSnapshot();
         sendJson(res, 200, { ok: true, snapshot });
@@ -50,7 +50,7 @@ export class ApiRouter {
         workspace: String(body.workspace ?? "demo"),
         userId: typeof body.userId === "string" ? body.userId : undefined,
       });
-      await this.options.runtimeManager.withNewSessionRuntime(tenant.workspace, tenant.userId, async (runtime, sessionId) => {
+      await this.options.runtimeManager.withNewSessionRuntime(tenant.workspace, tenant.userId, undefined, async (runtime, sessionId) => {
         const snapshot = await runtime.getSnapshot();
         sendJson(res, 200, { ok: true, sessionId, snapshot });
       });
@@ -84,7 +84,7 @@ export class ApiRouter {
       if (result.recoveredSession) payload.recoveredSession = true;
       if (result.previousSessionId) payload.previousSessionId = result.previousSessionId;
       if (includeSnapshot) {
-        await this.options.runtimeManager.withRuntime(workspace, userId, result.output.sessionId, async (runtime) => {
+        await this.options.runtimeManager.withRuntime(workspace, userId, undefined, result.output.sessionId, async (runtime) => {
           payload.snapshot = await runtime.getSnapshot();
         });
       }
@@ -108,7 +108,7 @@ export class ApiRouter {
       if (result.recoveredSession) payload.recoveredSession = true;
       if (result.previousSessionId) payload.previousSessionId = result.previousSessionId;
       if (includeSnapshot) {
-        await this.options.runtimeManager.withRuntime(workspace, userId, result.output.sessionId, async (runtime) => {
+        await this.options.runtimeManager.withRuntime(workspace, userId, undefined, result.output.sessionId, async (runtime) => {
           payload.snapshot = await runtime.getSnapshot();
         });
       }

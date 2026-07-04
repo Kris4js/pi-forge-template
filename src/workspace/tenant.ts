@@ -35,8 +35,11 @@ export function resolveTenantIdentity(
   const anonymousUserFallback = !rawUserId;
   const userId = normalizeTenantSegment(rawUserId || DEFAULT_USER_ID, DEFAULT_USER_ID, { lowerCase: false });
   const sessionId = input.sessionId?.trim() || undefined;
+  const agentName = input.agentName
+    ? normalizeTenantSegment(input.agentName, "default", { lowerCase: true })
+    : undefined;
 
-  return { workspace, userId, sessionId, anonymousUserFallback };
+  return { workspace, userId, sessionId, agentName, anonymousUserFallback };
 }
 
 export function normalizeTenantSegment(

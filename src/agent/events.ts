@@ -1,4 +1,4 @@
-import type { AgentSessionEvent } from "@mariozechner/pi-coding-agent";
+import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import type { ToolStreamEvent } from "../types.js";
 
 export function toToolStreamEvent(event: AgentSessionEvent): ToolStreamEvent | undefined {

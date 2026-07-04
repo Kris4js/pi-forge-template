@@ -2,12 +2,14 @@ export type TenantIdentity = {
   workspace: string;
   userId: string;
   sessionId?: string;
+  agentName?: string;
 };
 
 export type TenantIdentityInput = {
   workspace?: string;
   userId?: string;
   sessionId?: string;
+  agentName?: string;
 };
 
 export type ChatMessage = {
@@ -47,6 +49,7 @@ export type ToolStreamEvent =
 export type ChatOptions = {
   sessionId?: string;
   userId?: string;
+  agentName?: string;
   stream?: boolean;
   onTextDelta?: (delta: string) => void;
   onToolEvent?: (event: ToolStreamEvent) => void;

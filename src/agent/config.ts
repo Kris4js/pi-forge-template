@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import type { AgentSessionRuntime } from "@mariozechner/pi-coding-agent";
+import { fileURLToPath } from "node:url";
+import type { AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 import {
   CUSTOM_PROTOCOLS,
   CUSTOM_PROVIDER_ID,
@@ -26,10 +27,12 @@ export type AgentRuntimeConfigOptions = {
   envFilePath?: string;
 };
 
+const defaultEnvFilePath = resolve(fileURLToPath(new URL("../..", import.meta.url)), ".env");
+
 export class AgentRuntimeConfig {
   private readonly envFilePath: string;
   constructor(options: AgentRuntimeConfigOptions = {}) {
-    this.envFilePath = resolve(options.envFilePath ?? ".env");
+    this.envFilePath = options.envFilePath ? resolve(options.envFilePath) : defaultEnvFilePath;
   }
 
   // 加载配置文件、合并环境变量

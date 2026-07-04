@@ -63,7 +63,7 @@ export function resolveWorkspacePaths(options: WorkspaceOptions = {}): Workspace
 export async function ensureWorkspaceDirs(paths: WorkspacePaths): Promise<void> {
   await mkdir(paths.sessionDir, { recursive: true });
   await mkdir(paths.sharedDir, { recursive: true });
-  await mkdir(join(paths.workspaceDir, "skills"), { recursive: true });
+  await mkdir(join(paths.workspaceDir, ".pi", "skills"), { recursive: true });
 }
 
 export async function listWorkspaceNames(rootDir: string): Promise<string[]> {
@@ -87,5 +87,9 @@ export function normalizeWorkspaceName(input: string): string {
 
 export function normalizeUserId(input: string | undefined): string {
   return normalizeTenantSegment(input, DEFAULT_USER_ID, { lowerCase: false });
+}
+
+export function normalizeAgentName(input: string | undefined): string {
+  return normalizeTenantSegment(input, "default", { lowerCase: true });
 }
 
