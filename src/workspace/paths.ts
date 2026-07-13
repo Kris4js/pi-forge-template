@@ -1,16 +1,10 @@
 import { mkdir, readdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  DEFAULT_USER_ID,
-  normalizeTenantSegment,
-  resolveTenantIdentity,
-} from "./tenant.js";
+import { DEFAULT_USER_ID, normalizeTenantSegment, resolveTenantIdentity } from "./tenant.js";
 
 const projectRootDir = resolve(fileURLToPath(new URL("../..", import.meta.url)));
-const defaultWorkspaceRootDir = resolve(
-  process.env.PI_WORKSPACES_DIR ?? join(projectRootDir, ".workspaces"),
-);
+const defaultWorkspaceRootDir = resolve(process.env.PI_WORKSPACES_DIR ?? join(projectRootDir, ".workspaces"));
 
 export type WorkspaceOptions = {
   rootDir?: string;
@@ -69,7 +63,10 @@ export async function ensureWorkspaceDirs(paths: WorkspacePaths): Promise<void> 
 export async function listWorkspaceNames(rootDir: string): Promise<string[]> {
   try {
     const entries = await readdir(rootDir, { withFileTypes: true });
-    return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
+    return entries
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort();
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === "ENOENT") return [];
@@ -92,4 +89,3 @@ export function normalizeUserId(input: string | undefined): string {
 export function normalizeAgentName(input: string | undefined): string {
   return normalizeTenantSegment(input, "default", { lowerCase: true });
 }
-

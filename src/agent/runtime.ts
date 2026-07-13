@@ -28,11 +28,7 @@ import { bootstrapAgentWorkspace } from "./bootstrap.js";
 import { AgentRuntimeConfig } from "./config.js";
 import { buildSystemPrompt } from "../prompt/system.js";
 import { getKanbanCreatorToolPrompt, getKanbanCreatorTools } from "../tools/kanban-creator/index.js";
-import type {
-  ChatInput,
-  ChatOptions,
-  ChatResult,
-} from "../types.js";
+import type { ChatInput, ChatOptions, ChatResult } from "../types.js";
 
 export type RuntimeOptions = WorkspaceOptions & {
   cwd?: string;
@@ -153,8 +149,9 @@ export class PiAgentRuntime {
     const session = runtime.session;
     let finalText = "";
     const writeToStdout = !options.onTextDelta && options.stream;
-    const emitTextDelta = options.onTextDelta
-      ?? (writeToStdout
+    const emitTextDelta =
+      options.onTextDelta ??
+      (writeToStdout
         ? (delta: string) => {
             process.stdout.write(delta);
           }
@@ -163,10 +160,7 @@ export class PiAgentRuntime {
       finalText = collectAssistantText(event, finalText);
       const toolEvent = toToolStreamEvent(event);
       if (toolEvent) options.onToolEvent?.(toolEvent);
-      if (
-        event.type === "message_update" &&
-        event.assistantMessageEvent.type === "text_delta"
-      ) {
+      if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
         emitTextDelta?.(event.assistantMessageEvent.delta);
       }
     });
@@ -346,4 +340,3 @@ async function readWorkspaceAgents(workspaceDir: string): Promise<string> {
     throw error;
   }
 }
-
