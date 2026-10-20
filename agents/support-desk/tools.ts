@@ -45,7 +45,7 @@ const tools: AgentToolsFactory = (ctx) => [
         detail: params.detail,
       };
       // Demo persistence: one JSONL file in the user's agent home.
-      await appendFile(join(ctx.agentHome, "tickets.jsonl"), JSON.stringify(ticket) + "\n");
+      await appendFile(join(ctx.userHome, "tickets.jsonl"), JSON.stringify(ticket) + "\n");
       return text(`工单已创建：${ticket.id}（优先级 ${ticket.priority}）`);
     },
   }),

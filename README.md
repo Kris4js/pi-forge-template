@@ -53,6 +53,7 @@ ANTHROPIC_API_KEY=...
 | `assistant` | 纯对话：流式输出、会话持久化、多轮续聊、上下文压缩 |
 | `support-desk` | 自定义工具（`tools.ts`）；`search_kb` 直接放行，`create_ticket` 必须人工审批 |
 | `data-analyst` | pi skills（5 个分析方法论 SKILL.md）+ `read` 内置工具的路径沙箱 + 数据查询工具 |
+| `html-designer` | 改编自 [vercel-labs/fx0](https://github.com/vercel-labs/fx0)：把描述写成单个自包含 HTML 页面；右侧栏实时预览（生成中显示无脚本草稿，发布后为可交互页面）、版本切换、设备宽度、复制/下载；10 种 design.md 风格作为 pi skills |
 
 新增 agent 的方法见 [agents/README.md](agents/README.md)。
 
@@ -64,8 +65,11 @@ ANTHROPIC_API_KEY=...
 |---|---|---|
 | GET | `/v1/me` | 当前身份与 runtime 信息 |
 | GET | `/v1/agents` | 当前身份可用的 agent |
-| GET | `/v1/agents/{agent}/sessions` | 会话列表 |
-| GET / DELETE | `/v1/agents/{agent}/sessions/{session}` | 会话记录 / 删除 |
+| GET | `/v1/sessions` | 用户的全部会话（跨 agent，每项带绑定的 `agentId`） |
+| GET / DELETE | `/v1/sessions/{session}` | 会话记录 / 删除 |
+| PATCH | `/v1/sessions/{session}` | `{"name"?, "pinned"?}`：重命名（pi `session_info` 条目，运行中的会话返回 409）/ 置顶（用户级偏好 `pins.json`） |
+| GET | `/v1/sessions/{session}/artifacts` | 会话的 HTML 页面版本列表 |
+| GET | `/v1/sessions/{session}/artifacts/{revision\|latest}` | 某个版本，JSON（`html` 字段），从不以 text/html 返回 |
 | POST | `/v1/runs` | `{"agentId","sessionId?","text","stream?"}`，默认返回 SSE |
 | GET | `/v1/runs/{run}/events?from=N` | 重放 / 续接事件流 |
 | POST | `/v1/runs/{run}/cancel` | 取消 |
@@ -76,7 +80,7 @@ curl -N -X POST localhost:8090/v1/runs -H 'X-Workspace: acme' -H 'X-User-Id: ali
   -d '{"agentId":"assistant","text":"你好"}'
 ```
 
-SSE 事件依次为：`run`（runId / sessionId）→ `run_started` → `text_delta` / `thinking_delta` / `tool_start` / `approval_required` / `approval_resolved` / `tool_end` / `message_end` / `compaction` → `run_finished`（`completed | failed | cancelled | timeout`）。
+SSE 事件依次为：`run`（runId / sessionId）→ `run_started` → `text_delta` / `thinking_delta` / `tool_start` / `approval_required` / `approval_resolved` / `tool_end` / `message_end` / `compaction` / `artifact_draft` / `artifact` → `run_finished`（`completed | failed | cancelled | timeout`）。
 
 ## 开发
 

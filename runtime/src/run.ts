@@ -7,10 +7,11 @@ import {
   type AgentSession,
   type AgentSessionEvent,
 } from "@earendil-works/pi-coding-agent";
-import type { AgentCatalog } from "./agents/manifest.ts";
+import type { AgentCatalog, AgentManifest } from "./agents/manifest.ts";
+import { ArtifactStore } from "./artifacts/store.ts";
 import { governanceExtension } from "./governance.ts";
 import { RpcError, type Peer } from "./ipc/peer.ts";
-import { openSession, textOf } from "./memory/sessions.ts";
+import { bindAgent, openSession, sessionAgent, sessionKey as keyOf, textOf } from "./memory/sessions.ts";
 import { Models } from "./model/registry.ts";
 import {
   ErrorCodes,
@@ -48,6 +49,11 @@ export class Runner {
     return this.active.size;
   }
 
+  /** Whether a run currently holds this session (see memory/sessions.ts sessionKey). */
+  isBusy(sessionKey: string): boolean {
+    return this.busySessions.has(sessionKey);
+  }
+
   async start(params: RunStartParams): Promise<RunStartResult> {
     const scope = assertScope(params);
     const runId = params.runId;
@@ -62,15 +68,23 @@ export class Runner {
     const emit = (event: RunEvent) => this.deps.peer.notify(Methods.runEvent, { runId, seq: seq++, event });
 
     let session: AgentSession;
+    let preview: AgentManifest["preview"];
     try {
       const agent = await this.deps.catalog.get(scope.agentId).catch((error: Error) => {
         throw new RpcError(ErrorCodes.notFound, `agent ${scope.agentId}: ${error.message}`);
       });
-      const paths = tenantPaths(this.deps.dataDir, scope);
-      await mkdir(paths.agentHome, { recursive: true });
+      preview = agent.manifest.preview;
+      const paths = tenantPaths(this.deps.dataDir, scope.tenant);
+      await mkdir(paths.userHome, { recursive: true });
       const sessionManager = await openSession(paths, params.sessionId);
+      // A session keeps the agent it was started with; sessions themselves are not split by agent.
+      const bound = sessionAgent(sessionManager);
+      if (bound && bound !== scope.agentId) {
+        throw new RpcError(ErrorCodes.conflict, `session belongs to agent ${bound}`, { agentId: bound });
+      }
+      if (!bound) bindAgent(sessionManager, scope.agentId);
 
-      const sessionKey = `${paths.sessionDir}:${sessionManager.getSessionId()}`;
+      const sessionKey = keyOf(paths, sessionManager.getSessionId());
       if (this.busySessions.has(sessionKey)) throw new RpcError(ErrorCodes.conflict, "session is busy");
       this.busySessions.add(sessionKey);
       run.sessionKey = sessionKey;
@@ -83,8 +97,8 @@ export class Runner {
         retry: { enabled: true, maxRetries: 2 },
       });
       const resourceLoader = new DefaultResourceLoader({
-        cwd: paths.agentHome,
-        agentDir: paths.agentHome,
+        cwd: paths.userHome,
+        agentDir: paths.userHome,
         settingsManager,
         noExtensions: true,
         noSkills: true,
@@ -103,9 +117,9 @@ export class Runner {
           governanceExtension({
             runId,
             peer: this.deps.peer,
-            cwd: paths.agentHome,
-            readRoots: [paths.agentHome, agent.dir],
-            writeRoots: [paths.agentHome],
+            cwd: paths.userHome,
+            readRoots: [paths.userHome, agent.dir],
+            writeRoots: [paths.userHome],
           }),
         ],
       });
@@ -121,11 +135,13 @@ export class Runner {
         tenant: scope.tenant,
         agentId: scope.agentId,
         agentDir: agent.dir,
-        agentHome: paths.agentHome,
+        userHome: paths.userHome,
+        sessionId: sessionManager.getSessionId(),
+        artifacts: ArtifactStore.forSession(paths, sessionManager.getSessionId()),
       });
       ({ session } = await createAgentSession({
-        cwd: paths.agentHome,
-        agentDir: paths.agentHome,
+        cwd: paths.userHome,
+        agentDir: paths.userHome,
         authStorage: this.deps.models.authStorage,
         modelRegistry: this.deps.models.registry,
         model,
@@ -149,7 +165,7 @@ export class Runner {
       agentId: scope.agentId,
       model: session.model ? Models.label(session.model) : undefined,
     });
-    void this.execute(run, session, text, emit);
+    void this.execute(run, session, text, emit, preview);
     return { sessionId };
   }
 
@@ -166,15 +182,23 @@ export class Runner {
     await Promise.all([...this.active.keys()].map((id) => this.cancel(id)));
   }
 
-  private async execute(run: ActiveRun, session: AgentSession, text: string, emit: (e: RunEvent) => void) {
+  private async execute(
+    run: ActiveRun,
+    session: AgentSession,
+    text: string,
+    emit: (e: RunEvent) => void,
+    preview: AgentManifest["preview"],
+  ) {
     const usage: Usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0 };
+    const drafts = new Map<string, string>();
     let lastStop: { reason: string; error?: string } | undefined;
     const unsubscribe = session.subscribe((event) => {
-      const mapped = mapEvent(event, usage);
       if (event.type === "message_end" && event.message.role === "assistant") {
         lastStop = { reason: event.message.stopReason, error: event.message.errorMessage };
       }
-      if (mapped) emit(mapped);
+      const draft = preview && draftEvent(event, preview, drafts);
+      if (draft) emit(draft);
+      for (const mapped of mapEvent(event, usage)) emit(mapped);
     });
 
     let status: RunStatus = "completed";
@@ -207,26 +231,58 @@ export class Runner {
   }
 }
 
-function mapEvent(event: AgentSessionEvent, usage: Usage): RunEvent | undefined {
+/**
+ * While the preview tool's call streams, pi parses its arguments incrementally; forward the growth of
+ * the preview argument (fx0's live design draft). A value that is not an extension restarts at offset 0.
+ */
+function draftEvent(
+  event: AgentSessionEvent,
+  preview: NonNullable<AgentManifest["preview"]>,
+  drafts: Map<string, string>,
+): RunEvent | undefined {
+  if (event.type !== "message_update" || event.assistantMessageEvent.type !== "toolcall_delta") return undefined;
+  const inner = event.assistantMessageEvent;
+  const block = inner.partial.content[inner.contentIndex];
+  if (block?.type !== "toolCall" || block.name !== preview.tool || !block.id) return undefined;
+  const value = (block.arguments as Record<string, unknown> | undefined)?.[preview.argument];
+  if (typeof value !== "string") return undefined;
+  const previous = drafts.get(block.id) ?? "";
+  if (value === previous) return undefined;
+  drafts.set(block.id, value);
+  return value.startsWith(previous)
+    ? { type: "artifact_draft", toolCallId: block.id, offset: previous.length, delta: value.slice(previous.length) }
+    : { type: "artifact_draft", toolCallId: block.id, offset: 0, delta: value };
+}
+
+function mapEvent(event: AgentSessionEvent, usage: Usage): RunEvent[] {
   switch (event.type) {
     case "message_update": {
       const inner = event.assistantMessageEvent;
-      if (inner.type === "text_delta") return { type: "text_delta", delta: inner.delta };
-      if (inner.type === "thinking_delta") return { type: "thinking_delta", delta: inner.delta };
-      return undefined;
+      if (inner.type === "text_delta") return [{ type: "text_delta", delta: inner.delta }];
+      if (inner.type === "thinking_delta") return [{ type: "thinking_delta", delta: inner.delta }];
+      return [];
     }
     case "tool_execution_start":
-      return { type: "tool_start", toolCallId: event.toolCallId, toolName: event.toolName, args: event.args };
-    case "tool_execution_end":
-      return {
-        type: "tool_end",
-        toolCallId: event.toolCallId,
-        toolName: event.toolName,
-        isError: event.isError,
-        result: textOf((event.result as { content?: unknown } | undefined)?.content ?? event.result),
-      };
+      return [{ type: "tool_start", toolCallId: event.toolCallId, toolName: event.toolName, args: event.args }];
+    case "tool_execution_end": {
+      const result = event.result as { content?: unknown; details?: { artifact?: { revision?: unknown; bytes?: unknown } } } | undefined;
+      const out: RunEvent[] = [
+        {
+          type: "tool_end",
+          toolCallId: event.toolCallId,
+          toolName: event.toolName,
+          isError: event.isError,
+          result: textOf(result?.content ?? event.result),
+        },
+      ];
+      const artifact = result?.details?.artifact;
+      if (!event.isError && typeof artifact?.revision === "number") {
+        out.push({ type: "artifact", toolCallId: event.toolCallId, revision: artifact.revision, bytes: Number(artifact.bytes) || 0 });
+      }
+      return out;
+    }
     case "message_end": {
-      if (event.message.role !== "assistant") return undefined;
+      if (event.message.role !== "assistant") return [];
       const u = event.message.usage;
       const messageUsage: Usage = {
         // pi reports input excluding cache categories; prompt tokens = input + cache read + cache write.
@@ -237,19 +293,21 @@ function mapEvent(event: AgentSessionEvent, usage: Usage): RunEvent | undefined 
         totalTokens: u.totalTokens,
       };
       for (const key of Object.keys(usage) as (keyof Usage)[]) usage[key] += messageUsage[key];
-      return {
-        type: "message_end",
-        text: textOf(event.message.content),
-        stopReason: event.message.stopReason,
-        usage: messageUsage,
-        error: event.message.errorMessage,
-      };
+      return [
+        {
+          type: "message_end",
+          text: textOf(event.message.content),
+          stopReason: event.message.stopReason,
+          usage: messageUsage,
+          error: event.message.errorMessage,
+        },
+      ];
     }
     case "compaction_start":
-      return { type: "compaction", phase: "start" };
+      return [{ type: "compaction", phase: "start" }];
     case "compaction_end":
-      return { type: "compaction", phase: "end" };
+      return [{ type: "compaction", phase: "end" }];
     default:
-      return undefined;
+      return [];
   }
 }

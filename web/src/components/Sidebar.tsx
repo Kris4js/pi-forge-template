@@ -1,22 +1,28 @@
-import { Anvil, MessageSquare, Plus, Search, Settings2, Trash2, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { Anvil, Check, ChevronDown, MoreVertical, Pin, Plus, Search, Settings2, SlidersHorizontal, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Agent, Identity, SessionSummary } from "../api";
-import { Button, LiveDot } from "../ui";
 import { agentIcon } from "../lib/icons";
+import { Button, LiveDot } from "../ui";
+import { SessionMenu } from "./SessionMenu";
+
+const COLLAPSED_KEY = "pi-forge.history-collapsed";
 
 type Props = {
+  /** For the agent filter. */
   agents: Agent[];
-  agentId?: string;
   sessions: SessionSummary[];
   sessionId?: string;
+  /** The session a run is streaming in, if any. */
+  runningSessionId?: string;
   identity: Identity;
   model?: string;
   online: boolean;
   busy: boolean;
-  onAgent: (id: string) => void;
   onNew: () => void;
   onOpen: (id: string) => void;
   onDelete: (session: SessionSummary) => void;
+  onRename: (session: SessionSummary, name: string) => void;
+  onPin: (session: SessionSummary, pinned: boolean) => void;
   onSettings: () => void;
   onClose?: () => void;
 };
@@ -29,32 +35,35 @@ export function sessionTitle(s: SessionSummary) {
   return plain || "未命名会话";
 }
 
-function groupLabel(iso: string): string {
-  const day = new Date(iso);
-  const today = new Date();
-  const startOf = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  const diff = Math.round((startOf(today) - startOf(day)) / 86_400_000);
-  if (diff <= 0) return "今天";
-  if (diff === 1) return "昨天";
-  if (diff < 7) return "近 7 天";
-  if (diff < 30) return "近 30 天";
-  return "更早";
-}
-
 export function Sidebar(props: Props) {
-  const { agents, agentId, sessions, sessionId, identity, busy } = props;
+  const { agents, sessions, sessionId, identity, busy } = props;
   const [query, setQuery] = useState("");
-
-  const groups = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const filtered = q ? sessions.filter((s) => sessionTitle(s).toLowerCase().includes(q)) : sessions;
-    const map = new Map<string, SessionSummary[]>();
-    for (const s of filtered) {
-      const label = groupLabel(s.updatedAt);
-      map.set(label, [...(map.get(label) ?? []), s]);
+  const [agentFilter, setAgentFilter] = useState<string>();
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem(COLLAPSED_KEY) === "1";
+    } catch {
+      return false;
     }
-    return [...map.entries()];
-  }, [sessions, query]);
+  });
+  const [menu, setMenu] = useState<{ session: SessionSummary; anchor: HTMLElement }>();
+  const [renaming, setRenaming] = useState<string>();
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(COLLAPSED_KEY, collapsed ? "1" : "0");
+    } catch {
+      // preference only
+    }
+  }, [collapsed]);
+
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return sessions.filter(
+      (s) => (!agentFilter || s.agentId === agentFilter) && (!q || sessionTitle(s).toLowerCase().includes(q)),
+    );
+  }, [sessions, query, agentFilter]);
 
   const initials = (identity.userId || "?").slice(0, 2).toUpperCase();
 
@@ -71,29 +80,6 @@ export function Sidebar(props: Props) {
         )}
       </div>
 
-      <div className="section-heading">Agents</div>
-      <nav className="agent-list" aria-label="agents">
-        {agents.map((a) => (
-          <button
-            key={a.id}
-            className={`agent-row ${a.id === agentId ? "selected" : ""}`}
-            disabled={busy && a.id !== agentId}
-            onClick={() => props.onAgent(a.id)}
-            title={a.description}
-          >
-            <span className="agent-avatar">{agentIcon(a.id, 15)}</span>
-            <span className="agent-text">
-              <strong>{a.name}</strong>
-              <small>
-                {a.tools.length ? `${a.tools.length} 个工具` : "纯对话"}
-                {a.approvalRequired.length ? ` · ${a.approvalRequired.length} 需审批` : ""}
-              </small>
-            </span>
-          </button>
-        ))}
-        {agents.length === 0 && <div className="history-empty small">没有可用的 agent</div>}
-      </nav>
-
       <Button className="new-chat" icon={<Plus size={17} />} disabled={busy} onClick={props.onNew}>
         新会话
         <kbd>⌘K</kbd>
@@ -109,64 +95,182 @@ export function Sidebar(props: Props) {
         )}
       </label>
 
-      <nav className="history" aria-label="会话记录">
-        {groups.map(([label, list]) => (
-          <div key={label} className="history-group">
-            <div className="history-heading">
-              {label}
-              <span>{list.length}</span>
-            </div>
-            {list.map((s) => (
-              <div key={s.id} className={`session ${s.id === sessionId ? "selected" : ""}`}>
+      <div className="history-header">
+        <button
+          type="button"
+          className="history-toggle"
+          aria-expanded={!collapsed}
+          aria-controls="history-list"
+          onClick={() => setCollapsed((v) => !v)}
+        >
+          对话和任务
+          <ChevronDown size={14} className={collapsed ? "collapsed" : ""} />
+        </button>
+        <div className="history-tools">
+          <button
+            type="button"
+            className={`history-tool ${agentFilter ? "on" : ""}`}
+            aria-label="按 agent 筛选"
+            title="按 agent 筛选"
+            aria-expanded={filterOpen}
+            onClick={() => setFilterOpen((v) => !v)}
+          >
+            <SlidersHorizontal size={15} />
+          </button>
+          {filterOpen && (
+            <AgentFilter
+              agents={agents}
+              value={agentFilter}
+              onChange={(id) => {
+                setAgentFilter(id);
+                setFilterOpen(false);
+              }}
+              onClose={() => setFilterOpen(false)}
+            />
+          )}
+        </div>
+      </div>
+
+      {/* Collapsing hides the rows only: the list keeps its space so the profile stays at the bottom. */}
+      <nav id="history-list" className="history" aria-label="对话和任务">
+        {!collapsed && visible.map((s) => {
+          const selected = s.id === sessionId;
+          const running = s.id === props.runningSessionId;
+          const menuOpen = menu?.session.id === s.id;
+          return (
+            <div key={s.id} className={`session ${selected ? "selected" : ""} ${menuOpen ? "menu-open" : ""}`}>
+              {renaming === s.id ? (
+                <RenameInput
+                  initial={sessionTitle(s)}
+                  onDone={(name) => {
+                    setRenaming(undefined);
+                    if (name && name !== sessionTitle(s)) props.onRename(s, name);
+                  }}
+                />
+              ) : (
                 <button
                   className="session-select"
-                  aria-current={s.id === sessionId ? "page" : undefined}
-                  disabled={busy && s.id !== sessionId}
+                  aria-current={selected ? "page" : undefined}
+                  disabled={busy && !selected}
                   onClick={() => props.onOpen(s.id)}
                   title={sessionTitle(s)}
                 >
-                  <MessageSquare size={14} />
-                  <span>{sessionTitle(s)}</span>
-                  <small>{s.messageCount}</small>
+                  <span className={`session-dot ${running ? "running" : ""}`} aria-hidden="true">
+                    {s.pinned && !running ? <Pin size={11} /> : null}
+                  </span>
+                  <span className="session-title">{sessionTitle(s)}</span>
                 </button>
-                <div className="session-actions">
-                  <Button
-                    size="icon"
-                    aria-label={`删除 ${sessionTitle(s)}`}
-                    title="删除"
-                    disabled={busy}
-                    icon={<Trash2 size={13} />}
-                    onClick={() => props.onDelete(s)}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
-        ))}
-        {groups.length === 0 && (
-          <div className="history-empty">
-            <MessageSquare size={22} />
-            <p>{query ? "没有找到相关会话" : "还没有会话"}</p>
-            <small>{query ? "换个关键词试试" : "会话保存在 pi 的 JSONL 存储里"}</small>
-          </div>
-        )}
+              )}
+              {renaming !== s.id && (
+                <button
+                  type="button"
+                  className="session-more"
+                  aria-label={`${sessionTitle(s)} 的更多操作`}
+                  aria-haspopup="menu"
+                  aria-expanded={menuOpen}
+                  onClick={(e) => setMenu(menuOpen ? undefined : { session: s, anchor: e.currentTarget })}
+                >
+                  <MoreVertical size={15} />
+                </button>
+              )}
+            </div>
+          );
+        })}
       </nav>
+
+      {menu && (
+        <SessionMenu
+          anchor={menu.anchor}
+          pinned={!!menu.session.pinned}
+          onPin={() => props.onPin(menu.session, !menu.session.pinned)}
+          onRename={() => setRenaming(menu.session.id)}
+          onDelete={() => props.onDelete(menu.session)}
+          onClose={() => setMenu(undefined)}
+        />
+      )}
 
       <div className="sidebar-bottom">
         <button className="profile" onClick={props.onSettings} title="身份与偏好设置">
           <span className="avatar">{initials}</span>
-          <span className="profile-text">
-            {identity.userId || "anonymous"}
-            <small>
-              {identity.workspace || "demo"} · {identity.apiKey ? "API key" : "dev 模式"}
-            </small>
-          </span>
+          <span className="profile-text">{identity.userId || "anonymous"}</span>
           <span className="profile-status" title={props.online ? `runtime 在线 · ${props.model ?? ""}` : "无法连接 gateway"}>
             <LiveDot tone={props.online ? "ok" : "danger"} />
           </span>
           <Settings2 size={15} className="profile-gear" />
         </button>
       </div>
+    </div>
+  );
+}
+
+function RenameInput({ initial, onDone }: { initial: string; onDone: (name: string | null) => void }) {
+  const [value, setValue] = useState(initial);
+  const input = useRef<HTMLInputElement>(null);
+  const done = useRef(false);
+  const finish = (name: string | null) => {
+    if (done.current) return;
+    done.current = true;
+    onDone(name);
+  };
+  useEffect(() => {
+    input.current?.focus();
+    input.current?.select();
+  }, []);
+  return (
+    <input
+      ref={input}
+      className="session-rename"
+      aria-label="会话名称"
+      value={value}
+      maxLength={80}
+      onChange={(e) => setValue(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+        if (e.key === "Enter") finish(value.trim() || null);
+        if (e.key === "Escape") finish(null);
+      }}
+      onBlur={() => finish(value.trim() || null)}
+    />
+  );
+}
+
+function AgentFilter({
+  agents,
+  value,
+  onChange,
+  onClose,
+}: {
+  agents: Agent[];
+  value?: string;
+  onChange: (id: string | undefined) => void;
+  onClose: () => void;
+}) {
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const onPointer = (e: PointerEvent) => {
+      if (!box.current?.parentElement?.contains(e.target as Node)) onClose();
+    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("pointerdown", onPointer);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", onPointer);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
+  const options: Array<{ id?: string; label: string; icon?: JSX.Element }> = [
+    { label: "全部" },
+    ...agents.map((a) => ({ id: a.id, label: a.name, icon: agentIcon(a.id, 14) })),
+  ];
+  return (
+    <div ref={box} className="session-menu filter-menu" role="menu">
+      {options.map((o) => (
+        <button key={o.id ?? "all"} type="button" role="menuitemradio" aria-checked={value === o.id} onClick={() => onChange(o.id)}>
+          {o.icon ?? <span className="filter-spacer" />}
+          <span>{o.label}</span>
+          {value === o.id && <Check size={14} />}
+        </button>
+      ))}
     </div>
   );
 }

@@ -565,3 +565,204 @@
     color: inherit;
   }
 }
+
+/* ---------- Select (shadcn nova on Base UI) ---------- */
+
+.select-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  width: fit-content;
+  height: 32px;
+  padding: 0 8px 0 10px;
+  border: 1px solid var(--cds-border-strong);
+  border-radius: 8px;
+  font-size: 13px;
+  white-space: nowrap;
+  color: var(--cds-text-primary);
+  background: transparent;
+  outline: none;
+  user-select: none;
+  transition:
+    background-color 120ms,
+    border-color 120ms,
+    box-shadow 120ms;
+}
+
+.select-trigger[data-size="sm"] {
+  height: 28px;
+  border-radius: 7px;
+  font-size: 12.5px;
+}
+
+.select-trigger:hover,
+.select-trigger[data-popup-open] {
+  background: var(--cds-fill-ghost-hover);
+}
+
+.select-trigger:focus-visible {
+  border-color: var(--cds-clay);
+  box-shadow: 0 0 0 3px rgba(217, 119, 87, 0.2);
+}
+
+.select-trigger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.select-trigger[data-placeholder] .select-value {
+  color: var(--cds-text-muted);
+}
+
+.select-value {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+}
+
+.select-trigger-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: var(--cds-text-muted);
+  pointer-events: none;
+}
+
+.select-positioner {
+  z-index: 60;
+  isolation: isolate;
+  outline: none;
+}
+
+.select-content {
+  position: relative;
+  min-width: max(144px, var(--anchor-width));
+  max-height: var(--available-height);
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 4px;
+  border-radius: 10px;
+  font-size: 13px;
+  color: var(--cds-text-primary);
+  background: var(--cds-surface-popover);
+  box-shadow: var(--cds-shadow-popover);
+  transform-origin: var(--transform-origin);
+  transition:
+    opacity 100ms,
+    transform 100ms;
+  outline: none;
+}
+
+.select-content[data-starting-style],
+.select-content[data-ending-style] {
+  opacity: 0;
+  transform: scale(0.95);
+}
+
+/* Aligned over the trigger (macOS style): no zoom, just appear. */
+.select-content[data-align-trigger="true"] {
+  transition: none;
+}
+
+.select-group {
+  padding: 2px 0;
+}
+
+.select-label {
+  padding: 4px 8px;
+  font-size: 11.5px;
+  color: var(--cds-text-muted);
+}
+
+.select-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 32px 6px 8px;
+  border-radius: 6px;
+  cursor: default;
+  outline: none;
+  user-select: none;
+}
+
+.select-item[data-highlighted] {
+  background: var(--cds-fill-ghost-hover);
+}
+
+.select-item[data-disabled] {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.select-item-text {
+  display: flex;
+  flex: 1;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.select-item-indicator {
+  position: absolute;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--app-action);
+  pointer-events: none;
+}
+
+.select-item-indicator svg {
+  width: 15px;
+  height: 15px;
+}
+
+.select-separator {
+  height: 1px;
+  margin: 4px -4px;
+  background: var(--cds-border-subtle);
+  pointer-events: none;
+}
+
+.select-scroll-button {
+  position: sticky;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 2px 0;
+  background: var(--cds-surface-popover);
+  cursor: default;
+}
+
+.select-scroll-button.up {
+  top: 0;
+}
+
+.select-scroll-button.down {
+  bottom: 0;
+}
+
+.select-scroll-button svg {
+  width: 15px;
+  height: 15px;
+}
+
+.select-trigger-icon {
+  display: inline-flex;
+}
+
+.select-trigger-icon svg {
+  width: 16px;
+  height: 16px;
+}

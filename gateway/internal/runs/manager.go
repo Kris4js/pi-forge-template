@@ -46,11 +46,11 @@ type Manager struct {
 	limits Limits
 	log    *slog.Logger
 
-	mu          sync.Mutex
-	runs        map[string]*Run
-	sessions    map[string]string // session key -> run id
+	mu           sync.Mutex
+	runs         map[string]*Run
+	sessions     map[string]string // session key -> run id
 	perWorkspace map[string]int
-	active      int
+	active       int
 }
 
 func NewManager(rt Caller, limits Limits, log *slog.Logger) *Manager {
@@ -349,7 +349,7 @@ type approval struct {
 }
 
 func sessionKey(run *Run) string {
-	return fmt.Sprintf("%s/%s/%s/%s", run.Tenant.Workspace, run.Tenant.UserID, run.AgentID, run.SessionID)
+	return fmt.Sprintf("%s/%s/%s", run.Tenant.Workspace, run.Tenant.UserID, run.SessionID)
 }
 
 func newID() string {
@@ -368,4 +368,3 @@ func firstNonEmpty(values ...string) string {
 	}
 	return ""
 }
-

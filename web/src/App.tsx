@@ -1,9 +1,10 @@
 import { AnimatePresence, motion, MotionConfig } from "framer-motion";
-import { ArrowDown, Monitor, Moon, PanelLeft, PanelRight, Sun, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Api, type Agent, type Identity, type SessionSummary } from "./api";
+import { AppWindow, ArrowDown, Monitor, Moon, PanelLeft, PanelRight, Sun, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { Api, type Agent, type ArtifactSummary, type Identity, type SessionSummary } from "./api";
 import { Composer, type ComposerHandle } from "./components/Composer";
 import { DetailsPanel } from "./components/DetailsPanel";
+import { PreviewLink, PreviewPanel } from "./components/PreviewPanel";
 import { MessageList } from "./components/MessageList";
 import { Sidebar, sessionTitle } from "./components/Sidebar";
 import { NewChat } from "./components/NewChat";
@@ -18,6 +19,11 @@ const IDENTITY_KEY = "pi-forge.identity";
 const THEME_KEY = "pi-forge.theme";
 const DETAILS_KEY = "pi-forge.details";
 const DETAILS_WIDTH = 300;
+const PREVIEW_WIDTH_KEY = "pi-forge.preview-width";
+
+type PanelTab = "preview" | "details";
+
+const defaultPreviewWidth = () => Math.round(Math.min(Math.max(window.innerWidth * 0.42, 380), 1000));
 
 function readStored<T>(key: string, fallback: T): T {
   try {
@@ -41,7 +47,12 @@ export function App() {
     readStored(IDENTITY_KEY, { workspace: "demo", userId: "alice", apiKey: "" }),
   );
   const [theme, setTheme] = useState<Theme>(() => readStored(THEME_KEY, "system"));
-  const [showDetails, setShowDetails] = useState(() => readStored(DETAILS_KEY, false));
+  const [panel, setPanel] = useState<PanelTab | null>(() => (readStored(DETAILS_KEY, false) ? "details" : null));
+  const [previewWidth, setPreviewWidth] = useState(() => readStored(PREVIEW_WIDTH_KEY, defaultPreviewWidth()));
+  const [resizing, setResizing] = useState(false);
+  const [artifacts, setArtifacts] = useState<ArtifactSummary[]>([]);
+  const [previewRevision, setPreviewRevision] = useState<number | null>(null);
+  const [draft, setDraft] = useState<string | null>(null);
   const api = useMemo(() => new Api(identity), [identity]);
 
   const [model, setModel] = useState<string>();
@@ -76,8 +87,12 @@ export function App() {
   }, [theme]);
 
   useEffect(() => {
-    store(DETAILS_KEY, showDetails);
-  }, [showDetails]);
+    store(DETAILS_KEY, panel === "details");
+  }, [panel]);
+
+  useEffect(() => {
+    if (!resizing) store(PREVIEW_WIDTH_KEY, previewWidth);
+  }, [previewWidth, resizing]);
 
   useEffect(() => {
     store(IDENTITY_KEY, identity);
@@ -101,27 +116,36 @@ export function App() {
       .catch((e: Error) => setNotice(e.message));
   }, [api, identity]);
 
+  // Sessions belong to the user and mix all agents; each row carries the agent it is bound to.
   const refreshSessions = useCallback(() => {
-    if (!agentId) return;
     api
-      .sessions(agentId)
+      .sessions()
       .then(setSessions)
       .catch((e: Error) => setNotice(e.message));
-  }, [api, agentId]);
+  }, [api]);
+
+  const clearPreview = useCallback(() => {
+    setArtifacts([]);
+    setPreviewRevision(null);
+    setDraft(null);
+    setPanel((p) => (p === "preview" ? null : p));
+  }, []);
 
   useEffect(() => {
     setSessionId(undefined);
     setItems([]);
+    clearPreview();
     refreshSessions();
-  }, [refreshSessions]);
+  }, [refreshSessions, clearPreview]);
 
   const newChat = useCallback(() => {
     if (busy) return;
     setSessionId(undefined);
     setItems([]);
+    clearPreview();
     setMobileNav(false);
     composer.current?.focus();
-  }, [busy]);
+  }, [busy, clearPreview]);
 
   // ⌘K / Ctrl+K: new conversation.
   useEffect(() => {
@@ -136,13 +160,19 @@ export function App() {
   }, [newChat]);
 
   async function openSession(id: string) {
-    if (!agentId || busy) return;
+    if (busy) return;
     setMobileNav(false);
     setSessionId(id);
     setLoadingSession(true);
     try {
-      const detail = await api.session(agentId, id);
+      const [detail, list] = await Promise.all([api.session(id), api.artifacts(id)]);
+      // A session is continued by the agent it was started with.
+      if (detail.agentId && agents.some((a) => a.id === detail.agentId)) setAgentId(detail.agentId);
       setItems(fromTranscript(detail.messages));
+      setArtifacts(list);
+      setPreviewRevision(null);
+      setDraft(null);
+      setPanel((p) => (list.length ? "preview" : p === "preview" ? null : p));
       requestAnimationFrame(() => scroll.scrollToBottom(false));
     } catch (e) {
       setNotice((e as Error).message);
@@ -151,13 +181,25 @@ export function App() {
     }
   }
 
-  async function confirmDelete(session: SessionSummary) {
-    if (!agentId) return;
+  async function updateSession(session: SessionSummary, update: { name?: string; pinned?: boolean }) {
+    // Optimistic: reflect the change at once, then reconcile with the server's order.
+    setSessions((list) => list.map((s) => (s.id === session.id ? { ...s, ...update } : s)));
     try {
-      await api.deleteSession(agentId, session.id);
+      await api.updateSession(session.id, update);
+    } catch (e) {
+      const err = e as Error & { status?: number };
+      setNotice(err.status === 409 ? "会话正在运行，结束后再重命名" : err.message);
+    }
+    refreshSessions();
+  }
+
+  async function confirmDelete(session: SessionSummary) {
+    try {
+      await api.deleteSession(session.id);
       if (session.id === sessionId) {
         setSessionId(undefined);
         setItems([]);
+        clearPreview();
       }
       refreshSessions();
     } catch (e) {
@@ -176,6 +218,8 @@ export function App() {
     setBusy(true);
     const startedAt = Date.now();
     let runModel: string | undefined;
+    let runSession = sessionId;
+    let previewOpened = false;
     try {
       await api.run(
         { agentId, sessionId, text },
@@ -183,10 +227,31 @@ export function App() {
           if (event.type === "run") {
             setRunId(event.runId);
             setSessionId(event.sessionId);
+            runSession = event.sessionId;
           } else if (event.type === "run_started") {
             runModel = event.model;
             setSessionId(event.sessionId);
+            runSession = event.sessionId;
+          } else if (event.type === "artifact_draft") {
+            setDraft((prev) => (event.offset === 0 ? event.delta : (prev ?? "").slice(0, event.offset) + event.delta));
+            // Open the preview once per run when the page starts streaming; a reader who closes it keeps it closed.
+            if (!previewOpened) {
+              previewOpened = true;
+              setPreviewRevision(null);
+              setPanel("preview");
+            }
           } else {
+            if (event.type === "artifact" && runSession) {
+              const sid = runSession;
+              api
+                .artifacts(sid)
+                .then((list) => {
+                  setArtifacts(list);
+                  setPreviewRevision(null);
+                  setDraft(null);
+                })
+                .catch((e: Error) => setNotice(e.message));
+            }
             setItems((prev) => applyEvent(prev, event, { now: Date.now(), model: runModel, runStartedAt: startedAt }));
           }
         },
@@ -198,6 +263,7 @@ export function App() {
       abortRef.current = undefined;
       setBusy(false);
       setRunId(undefined);
+      setDraft(null);
       refreshSessions();
     }
   }
@@ -217,6 +283,30 @@ export function App() {
   }
 
   const isNewChat = items.length === 0 && !loadingSession;
+  const canPreview = !!agent?.preview || artifacts.length > 0;
+  const panelWidth = panel === "preview" ? previewWidth : DETAILS_WIDTH;
+
+  const openPreviewAt = (revision: number) => {
+    setPreviewRevision(revision === artifacts.at(-1)?.revision ? null : revision);
+    setPanel("preview");
+  };
+
+  // Drag the panel's left edge. Iframes would swallow the pointer, so they ignore it while resizing.
+  const startResize = (e: ReactPointerEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = previewWidth;
+    const max = Math.max(380, window.innerWidth - 264 - 420);
+    setResizing(true);
+    const move = (ev: PointerEvent) => setPreviewWidth(Math.round(Math.min(max, Math.max(340, startWidth + startX - ev.clientX))));
+    const up = () => {
+      setResizing(false);
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
   const composerEl = (
     <Composer
       ref={composer}
@@ -233,20 +323,18 @@ export function App() {
   const sidebar = (onClose?: () => void) => (
     <Sidebar
       agents={agents}
-      agentId={agentId}
       sessions={sessions}
       sessionId={sessionId}
       identity={identity}
       model={model}
       online={online}
       busy={busy}
-      onAgent={(id) => {
-        setAgentId(id);
-        setMobileNav(false);
-      }}
+      runningSessionId={busy ? sessionId : undefined}
       onNew={newChat}
       onOpen={(id) => void openSession(id)}
       onDelete={(session) => setModal({ kind: "delete", session })}
+      onRename={(session, name) => void updateSession(session, { name })}
+      onPin={(session, pinned) => void updateSession(session, { pinned })}
       onSettings={() => {
         setMobileNav(false);
         setModal({ kind: "settings" });
@@ -317,14 +405,25 @@ export function App() {
                 icon={theme === "dark" ? <Moon size={17} /> : theme === "light" ? <Sun size={17} /> : <Monitor size={17} />}
                 onClick={() => setTheme(theme === "system" ? "light" : theme === "light" ? "dark" : "system")}
               />
+              {canPreview && (
+                <Button
+                  size="icon"
+                  title="页面预览"
+                  aria-label="页面预览"
+                  aria-pressed={panel === "preview"}
+                  className={panel === "preview" ? "active" : ""}
+                  icon={<AppWindow size={17} />}
+                  onClick={() => setPanel((p) => (p === "preview" ? null : "preview"))}
+                />
+              )}
               <Button
                 size="icon"
                 title="运行详情"
                 aria-label="运行详情"
-                aria-pressed={showDetails}
-                className={showDetails ? "active" : ""}
+                aria-pressed={panel === "details"}
+                className={panel === "details" ? "active" : ""}
                 icon={<PanelRight size={17} />}
-                onClick={() => setShowDetails((v) => !v)}
+                onClick={() => setPanel((p) => (p === "details" ? null : "details"))}
               />
             </div>
           </header>
@@ -355,13 +454,15 @@ export function App() {
                   onPick={(text) => composer.current?.fill(text)}
                 />
               ) : (
-                <MessageList
-                  items={items}
-                  agentName={agent?.name ?? "agent"}
-                  busy={busy}
-                  onDecide={runId ? decide : undefined}
-                  onRetry={busy ? undefined : (text) => void send(text)}
-                />
+                <PreviewLink.Provider value={openPreviewAt}>
+                  <MessageList
+                    items={items}
+                    agentName={agent?.name ?? "agent"}
+                    busy={busy}
+                    onDecide={runId ? decide : undefined}
+                    onRetry={busy ? undefined : (text) => void send(text)}
+                  />
+                </PreviewLink.Provider>
               )}
             </div>
           </div>
@@ -392,23 +493,49 @@ export function App() {
         </main>
 
         <AnimatePresence>
-          {showDetails && (
+          {panel && (
             <motion.div
-              className="details-wrap"
+              className={`details-wrap ${resizing ? "resizing" : ""}`}
               initial={{ width: 0, opacity: 0 }}
-              animate={{ width: DETAILS_WIDTH, opacity: 1 }}
+              animate={{ width: panelWidth, opacity: 1 }}
               exit={{ width: 0, opacity: 0 }}
-              transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+              transition={resizing ? { duration: 0 } : { duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
             >
-              <DetailsPanel
-                agent={agent}
-                identity={identity}
-                model={model}
-                sessionId={sessionId}
-                runId={runId}
-                items={items}
-                onClose={() => setShowDetails(false)}
-              />
+              <aside className="side-panel" style={{ width: panelWidth }} aria-label="侧栏">
+                {panel === "preview" && (
+                  <div
+                    className="panel-resizer"
+                    role="separator"
+                    aria-orientation="vertical"
+                    aria-label="调整预览宽度"
+                    onPointerDown={startResize}
+                  />
+                )}
+                <div className="side-body">
+                  {panel === "preview" ? (
+                    <PreviewPanel
+                      api={api}
+                      sessionId={sessionId}
+                      artifacts={artifacts}
+                      revision={previewRevision}
+                      onRevision={setPreviewRevision}
+                      draft={draft}
+                      live={busy}
+                      onClose={() => setPanel(null)}
+                    />
+                  ) : (
+                    <DetailsPanel
+                      agent={agent}
+                      identity={identity}
+                      model={model}
+                      sessionId={sessionId}
+                      runId={runId}
+                      items={items}
+                      onClose={() => setPanel(null)}
+                    />
+                  )}
+                </div>
+              </aside>
             </motion.div>
           )}
         </AnimatePresence>
@@ -473,9 +600,6 @@ function SettingsModal({
           onSave({ workspace: draft.workspace.trim(), userId: draft.userId.trim(), apiKey: draft.apiKey.trim() });
         }}
       >
-        <p className="modal-description">
-          身份由 gateway 解析：携带 API key 时以 key 绑定的租户为准；dev 模式（FORGE_DEV_AUTH=1）下直接使用下面的 workspace / user。
-        </p>
         <div className="field-grid">
           <label className="field">
             Workspace

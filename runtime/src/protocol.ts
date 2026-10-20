@@ -12,7 +12,11 @@ export const Methods = {
   runCancel: "run.cancel",
   sessionList: "session.list",
   sessionGet: "session.get",
+  sessionInfo: "session.info",
   sessionDelete: "session.delete",
+  sessionUpdate: "session.update",
+  artifactList: "artifact.list",
+  artifactGet: "artifact.get",
   // runtime -> gateway
   toolAuthorize: "tool.authorize", // request: the gateway owns the allow/deny decision
   runEvent: "run.event", // notification
@@ -21,7 +25,10 @@ export const Methods = {
 /** Identity is resolved and authorized by the gateway; the runtime only validates its shape. */
 export type Tenant = { workspace: string; userId: string };
 
-export type SessionScope = { tenant: Tenant; agentId: string };
+/** Sessions belong to the user, not to an agent; a session records the agent it was started with. */
+export type TenantParams = { tenant: Tenant };
+
+export type SessionScope = TenantParams & { agentId: string };
 
 export type HelloResult = { protocolVersion: number; runtime: string; model?: string };
 
@@ -37,10 +44,14 @@ export type RunStartResult = { sessionId: string };
 
 export type RunCancelParams = { runId: string };
 
-export type SessionGetParams = SessionScope & { sessionId: string };
+export type SessionGetParams = TenantParams & { sessionId: string };
 
 export type SessionSummary = {
   id: string;
+  /** The agent the session is bound to. */
+  agentId?: string;
+  /** Pinned sessions are listed first. */
+  pinned?: boolean;
   name?: string;
   createdAt: string;
   updatedAt: string;
@@ -58,10 +69,22 @@ export type TranscriptMessage =
       error?: string;
       timestamp?: number;
     }
-  | { role: "tool"; toolCallId: string; toolName: string; text: string; isError: boolean }
+  | { role: "tool"; toolCallId: string; toolName: string; text: string; isError: boolean; artifactRevision?: number }
   | { role: "summary"; text: string };
 
-export type SessionDetail = { id: string; name?: string; messages: TranscriptMessage[] };
+export type SessionInfo = { id: string; agentId?: string };
+
+/** Rename (pi session_info entry) and/or pin (a per-user preference, not session content). */
+export type SessionUpdateParams = SessionGetParams & { name?: string; pinned?: boolean };
+
+export type SessionDetail = SessionInfo & { name?: string; messages: TranscriptMessage[] };
+
+/** One published version of a session's HTML artifact. */
+export type ArtifactSummary = { revision: number; bytes: number; createdAt: string };
+
+export type ArtifactGetParams = SessionGetParams & { revision?: number };
+
+export type ArtifactDetail = ArtifactSummary & { html: string };
 
 export type ToolAuthorizeParams = {
   runId: string;
@@ -90,6 +113,10 @@ export type RunEvent =
   | { type: "tool_end"; toolCallId: string; toolName: string; isError: boolean; result: string }
   | { type: "message_end"; text: string; stopReason: string; usage?: Usage; error?: string }
   | { type: "compaction"; phase: "start" | "end" }
+  /** The artifact argument of a streaming tool call, as appended text (offset 0 restarts it). */
+  | { type: "artifact_draft"; toolCallId: string; offset: number; delta: string }
+  /** A tool published a new artifact revision. */
+  | { type: "artifact"; toolCallId: string; revision: number; bytes: number }
   | { type: "run_finished"; status: RunStatus; error?: string; usage: Usage };
 
 export type RunEventParams = { runId: string; seq: number; event: RunEvent };

@@ -1,4 +1,5 @@
 import {
+  AppWindow,
   Brain,
   Clock,
   Database,
@@ -13,11 +14,12 @@ import {
   Wrench,
   X,
 } from "lucide-react";
-import { Fragment, useEffect, useState, type ReactNode } from "react";
+import { Fragment, useContext, useEffect, useState, type ReactNode } from "react";
 import type { Item } from "../conversation";
 import { Button, formatDuration } from "../ui";
 import { CodeView, guessLanguage } from "./CodeView";
 import { Markdown } from "./Markdown";
+import { PreviewLink } from "./PreviewPanel";
 import {
   Trace,
   TraceCollapsible,
@@ -247,6 +249,9 @@ function ToolStep({ tool, onDecide }: { tool: Tool; onDecide?: Decide }) {
   const status = tool.status === "running" ? "running" : pending ? "approval" : tool.status === "success" ? undefined : "error";
   const args = JSON.stringify(tool.args ?? {}, null, 2);
   const summary = argSummary(tool.args);
+  const htmlArg = (tool.args as { html?: unknown } | undefined)?.html;
+  const openPreview = useContext(PreviewLink);
+  const revision = tool.artifactRevision;
 
   return (
     <TraceCollapsible open={open ?? pending} onOpenChange={setOpen}>
@@ -255,11 +260,22 @@ function ToolStep({ tool, onDecide }: { tool: Tool; onDecide?: Decide }) {
           <TraceIcon>{toolIcon(tool.name)}</TraceIcon>
           <TraceTitle>{toolTitle(tool)}</TraceTitle>
           {summary && <TraceDescription className="trace-args-summary">{summary}</TraceDescription>}
+          {revision !== undefined && <TraceDescription className="trace-revision">v{revision}</TraceDescription>}
           {tool.durationMs !== undefined && <TraceDescription>{formatDuration(tool.durationMs)}</TraceDescription>}
         </TraceLine>
       </TraceCollapsibleTrigger>
       <TraceCollapsibleContent className="trace-tool">
-        <CodeView code={args} language="json" title="参数" size="sm" />
+        {revision !== undefined && openPreview && (
+          <button type="button" className="artifact-link" onClick={() => openPreview(revision)}>
+            <AppWindow size={14} />
+            在预览中查看 v{revision}
+          </button>
+        )}
+        {typeof htmlArg === "string" ? (
+          <CodeView code={htmlArg} language="html" title="HTML" size="sm" maxLines={16} />
+        ) : (
+          <CodeView code={args} language="json" title="参数" size="sm" />
+        )}
         {tool.result !== undefined && (
           <CodeView
             code={tool.result || "（无输出）"}
@@ -344,7 +360,13 @@ function argSummary(args: unknown): string {
   if (!args || typeof args !== "object") return "";
   return Object.values(args as Record<string, unknown>)
     .slice(0, 2)
-    .map((v) => (typeof v === "string" ? v : JSON.stringify(v)))
+    .map((v) =>
+      typeof v === "string" && /^\s*<!doctype html/i.test(v)
+        ? `HTML · ${(new Blob([v]).size / 1024).toFixed(1)} KB`
+        : typeof v === "string"
+          ? v
+          : JSON.stringify(v),
+    )
     .join(" · ")
     .slice(0, 60);
 }

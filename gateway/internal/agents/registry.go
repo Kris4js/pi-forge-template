@@ -38,6 +38,11 @@ type Manifest struct {
 	Tools       []string `json:"tools"`
 	Policy      Policy   `json:"policy"`
 	Starters    []string `json:"starters,omitempty"`
+	// Preview marks an agent that publishes HTML artifacts (see runtime artifact store).
+	Preview *struct {
+		Tool     string `json:"tool"`
+		Argument string `json:"argument"`
+	} `json:"preview,omitempty"`
 }
 
 func (m Manifest) Timeout(fallback time.Duration) time.Duration {

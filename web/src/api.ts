@@ -9,15 +9,29 @@ export type Agent = {
   tools: string[];
   approvalRequired: string[];
   starters: string[];
+  /** The agent publishes HTML pages that the console previews. */
+  preview: boolean;
 };
 
-export type SessionSummary = { id: string; name?: string; updatedAt: string; messageCount: number; preview: string };
+/** Sessions belong to the user; agentId is the agent the session is bound to. */
+export type SessionSummary = {
+  id: string;
+  agentId?: string;
+  pinned?: boolean;
+  name?: string;
+  updatedAt: string;
+  messageCount: number;
+  preview: string;
+};
 
 export type TranscriptMessage =
   | { role: "user"; text: string; timestamp?: number }
   | { role: "assistant"; text: string; thinking?: string; toolCalls?: { id: string; name: string; args: unknown }[]; error?: string }
-  | { role: "tool"; toolCallId: string; toolName: string; text: string; isError: boolean }
+  | { role: "tool"; toolCallId: string; toolName: string; text: string; isError: boolean; artifactRevision?: number }
   | { role: "summary"; text: string };
+
+export type ArtifactSummary = { revision: number; bytes: number; createdAt: string };
+export type ArtifactDetail = ArtifactSummary & { html: string };
 
 export type Usage = { inputTokens: number; outputTokens: number; totalTokens: number };
 
@@ -32,6 +46,8 @@ export type RunEvent =
   | { type: "approval_resolved"; toolCallId: string; decision: "allow" | "deny"; reason?: string; by?: string }
   | { type: "message_end"; text: string; stopReason: string; error?: string }
   | { type: "compaction"; phase: "start" | "end" }
+  | { type: "artifact_draft"; toolCallId: string; offset: number; delta: string }
+  | { type: "artifact"; toolCallId: string; revision: number; bytes: number }
   | { type: "run_finished"; status: string; error?: string; usage?: Usage };
 
 export class ApiError extends Error {
@@ -66,14 +82,23 @@ export class Api {
   agents() {
     return this.request<Agent[]>("GET", "/v1/agents");
   }
-  sessions(agentId: string) {
-    return this.request<SessionSummary[]>("GET", `/v1/agents/${agentId}/sessions`);
+  sessions() {
+    return this.request<SessionSummary[]>("GET", "/v1/sessions");
   }
-  session(agentId: string, sessionId: string) {
-    return this.request<{ id: string; messages: TranscriptMessage[] }>("GET", `/v1/agents/${agentId}/sessions/${sessionId}`);
+  session(sessionId: string) {
+    return this.request<{ id: string; agentId?: string; messages: TranscriptMessage[] }>("GET", `/v1/sessions/${sessionId}`);
   }
-  deleteSession(agentId: string, sessionId: string) {
-    return this.request<void>("DELETE", `/v1/agents/${agentId}/sessions/${sessionId}`);
+  artifacts(sessionId: string) {
+    return this.request<ArtifactSummary[]>("GET", `/v1/sessions/${sessionId}/artifacts`);
+  }
+  artifact(sessionId: string, revision: number | "latest") {
+    return this.request<ArtifactDetail>("GET", `/v1/sessions/${sessionId}/artifacts/${revision}`);
+  }
+  updateSession(sessionId: string, update: { name?: string; pinned?: boolean }) {
+    return this.request<void>("PATCH", `/v1/sessions/${sessionId}`, update);
+  }
+  deleteSession(sessionId: string) {
+    return this.request<void>("DELETE", `/v1/sessions/${sessionId}`);
   }
   cancel(runId: string) {
     return this.request<void>("POST", `/v1/runs/${runId}/cancel`);

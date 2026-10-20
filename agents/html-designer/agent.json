@@ -1,0 +1,19 @@
+{
+  "id": "html-designer",
+  "name": "页面设计",
+  "description": "描述一个页面，agent 把它写成单个自包含的 HTML 文件，右侧实时预览；可指定 Apple、Claude、Linear 等 10 种设计风格。改编自 vercel-labs/fx0。",
+  "tools": ["read", "read_design", "publish_design", "edit_design"],
+  "memory": { "compaction": true },
+  "preview": { "tool": "publish_design", "argument": "html" },
+  "policy": {
+    "tools": { "read": "allow", "read_design": "allow", "publish_design": "allow", "edit_design": "allow" },
+    "maxToolCalls": 30,
+    "timeoutMs": 300000
+  },
+  "starters": [
+    "做一个咖啡店的落地页，暖色调，有菜单和营业时间",
+    "用 Linear 风格做一个产品更新日志页面",
+    "做一个可以玩的贪吃蛇小游戏，键盘方向键控制",
+    "用 Apple 风格设计一个耳机产品介绍页"
+  ]
+}

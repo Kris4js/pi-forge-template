@@ -38,11 +38,12 @@ gateway (Go, 1 个进程)
 ```
 $FORGE_DATA_DIR/workspaces/<workspace>/
   AGENTS.md                                   # 可选，workspace 级指令，所有用户和 agent 共享
-  users/<user>/agents/<agent>/                # agent home：工具的 cwd，可写
-    sessions/<timestamp>_<sessionId>.jsonl    # pi SessionManager 会话文件
+  users/<user>/                               # 最后一层：用户目录，所有 agent 共用；工具的 cwd，可写
+    sessions/<timestamp>_<sessionId>.jsonl    # pi SessionManager 会话文件（所有 agent 的会话都在这里）
+    artifacts/<sessionId>/v<n>.html           # 会话的 HTML 产物版本
 ```
 
-延续了旧服务的 `workspace / user` 两级租户模型，新增 agent 维度：同一用户在不同 agent 下的会话互相隔离。
+延续旧服务的 `workspace / user` 两级租户模型，user 是最后一层：会话不按 agent 划分，侧栏列出用户的全部会话。每个会话在创建时用 pi 的 custom entry（`pi-forge.agent`，不进入 LLM 上下文）记录绑定的 agent：重新打开时由同一个 agent 继续，用其他 agent 续写会被 runtime 拒绝（409）；gateway 在列表、读取、删除和产物访问时按绑定的 agent 做 `policy.roles` 检查。
 
 ## Memory：完全复用 pi 官方机制
 
@@ -60,6 +61,21 @@ $FORGE_DATA_DIR/workspaces/<workspace>/
 ## Agent 定义
 
 `agents/<id>/agent.json` 由两端共享读取：gateway 读元数据和 `policy`，runtime 读 prompt / model / tools / skills。agent 定义在进程生命周期内不变，修改后需要重启 gateway（runtime 会被一起重启）。详见 [agents/README.md](../agents/README.md)。
+
+## HTML 产物与预览
+
+源自 vercel-labs/fx0 的设计 agent 能力被拆成平台通用部分和 agent 专属部分：
+
+| 部分 | 位置 | 说明 |
+|---|---|---|
+| 产物存储 | `runtime/src/artifacts/store.ts` | 每个 pi 会话一组版本：`<userHome>/artifacts/<sessionId>/v<n>.html` + `index.json`；同一内容重复发布不产生新版本；删除会话一并删除 |
+| 校验 | `runtime/src/artifacts/validate.ts` | 单文件完整文档、≤512 KiB、仅内联脚本/样式与 data: 资源，禁止注释、表单、base、嵌套 frame、meta refresh、脚本 URL |
+| 实时草稿 | `runtime/src/run.ts` | agent.json 的 `preview: { tool, argument }` 声明后，pi 流式解析该工具参数时以 `artifact_draft`（offset + delta）转发 |
+| 发布事件 | `runtime/src/run.ts` | 工具结果 `details.artifact = { revision, bytes }` → `artifact` 事件；会话记录里同样保留，历史回放可恢复版本 |
+| 查询 | gateway `GET …/artifacts[/{revision}]` | 只返回 JSON，产物永远不会以 text/html 在控制台同源下渲染 |
+| 预览 | `web/src/components/PreviewPanel.tsx` | 发布版：`sandbox="allow-scripts"`（无 allow-same-origin → 不透明源，Chrome 中为独立进程）+ 注入 CSP（禁止一切网络）+ 心跳（自导航后恢复）+ 外链经用户确认；草稿：去脚本、去外部资源后增量 patch 进无脚本 iframe |
+
+其它 agent 只要在工具里调用 `ctx.artifacts.publish(html)` 并返回 `details.artifact`，就能复用右侧预览。
 
 ## 已知边界
 

@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { ArtifactStore } from "../artifacts/store.ts";
 import type { Tenant } from "../protocol.ts";
 
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
@@ -27,6 +28,11 @@ export type AgentManifest = {
     /** pi auto-compaction of the session JSONL. Default true. */
     compaction?: boolean;
   };
+  /**
+   * Live preview while a tool call streams: the runtime forwards this string argument of this tool
+   * as artifact_draft events, e.g. { "tool": "publish_design", "argument": "html" }.
+   */
+  preview?: { tool: string; argument: string };
   /** Enforced by the gateway; listed here for completeness. */
   policy?: Record<string, unknown>;
   starters?: string[];
@@ -38,8 +44,12 @@ export type AgentToolContext = {
   agentId: string;
   /** Agent definition directory (read-only assets such as knowledge files). */
   agentDir: string;
-  /** Per-user writable directory for this agent. */
-  agentHome: string;
+  /** The user's writable directory, shared by all of the user's agents. */
+  userHome: string;
+  /** The pi session this run belongs to. */
+  sessionId: string;
+  /** Versioned HTML artifacts of this session. Return `details: { artifact: { revision, bytes } }` from a tool that publishes. */
+  artifacts: ArtifactStore;
 };
 
 export type AgentToolsFactory = (ctx: AgentToolContext) => ToolDefinition<any, any, any>[];

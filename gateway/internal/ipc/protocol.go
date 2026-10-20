@@ -16,7 +16,11 @@ const (
 	MethodRunCancel     = "run.cancel"
 	MethodSessionList   = "session.list"
 	MethodSessionGet    = "session.get"
+	MethodSessionInfo   = "session.info"
 	MethodSessionDelete = "session.delete"
+	MethodSessionUpdate = "session.update"
+	MethodArtifactList  = "artifact.list"
+	MethodArtifactGet   = "artifact.get"
 	MethodToolAuthorize = "tool.authorize"
 	MethodRunEvent      = "run.event"
 )
@@ -34,6 +38,12 @@ type HelloResult struct {
 	Model           string `json:"model,omitempty"`
 }
 
+// TenantParams addresses the user's own data. Sessions belong to the user, not to an agent.
+type TenantParams struct {
+	Tenant tenant.Tenant `json:"tenant"`
+}
+
+// SessionScope is a run's target: the user plus the agent that runs it.
 type SessionScope struct {
 	Tenant  tenant.Tenant `json:"tenant"`
 	AgentID string        `json:"agentId"`
@@ -55,8 +65,26 @@ type RunStartResult struct {
 }
 
 type SessionParams struct {
-	SessionScope
+	TenantParams
 	SessionID string `json:"sessionId"`
+}
+
+// SessionUpdateParams renames (pi session_info) and/or pins a session.
+type SessionUpdateParams struct {
+	SessionParams
+	Name   *string `json:"name,omitempty"`
+	Pinned *bool   `json:"pinned,omitempty"`
+}
+
+// SessionInfo names the agent a session is bound to (empty for a session without a binding).
+type SessionInfo struct {
+	ID      string `json:"id"`
+	AgentID string `json:"agentId,omitempty"`
+}
+
+type ArtifactParams struct {
+	SessionParams
+	Revision *int `json:"revision,omitempty"`
 }
 
 type ToolAuthorizeParams struct {

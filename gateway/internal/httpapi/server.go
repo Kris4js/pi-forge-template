@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -47,9 +48,12 @@ func (s *Server) Handler() http.Handler {
 	})
 	mux.Handle("GET /v1/me", s.authed(s.me))
 	mux.Handle("GET /v1/agents", s.authed(s.listAgents))
-	mux.Handle("GET /v1/agents/{agent}/sessions", s.authed(s.listSessions))
-	mux.Handle("GET /v1/agents/{agent}/sessions/{session}", s.authed(s.getSession))
-	mux.Handle("DELETE /v1/agents/{agent}/sessions/{session}", s.authed(s.deleteSession))
+	mux.Handle("GET /v1/sessions", s.authed(s.listSessions))
+	mux.Handle("GET /v1/sessions/{session}", s.authed(s.getSession))
+	mux.Handle("PATCH /v1/sessions/{session}", s.authed(s.updateSession))
+	mux.Handle("DELETE /v1/sessions/{session}", s.authed(s.deleteSession))
+	mux.Handle("GET /v1/sessions/{session}/artifacts", s.authed(s.listArtifacts))
+	mux.Handle("GET /v1/sessions/{session}/artifacts/{revision}", s.authed(s.getArtifact))
 	mux.Handle("POST /v1/runs", s.authed(s.startRun))
 	mux.Handle("GET /v1/runs/{run}/events", s.authed(s.runEvents))
 	mux.Handle("POST /v1/runs/{run}/cancel", s.authed(s.cancelRun))
@@ -86,6 +90,7 @@ type agentView struct {
 	Tools       []string `json:"tools"`
 	Approval    []string `json:"approvalRequired"`
 	Starters    []string `json:"starters"`
+	Preview     bool     `json:"preview"`
 }
 
 func (s *Server) listAgents(w http.ResponseWriter, r *http.Request, p auth.Principal) error {
@@ -94,7 +99,7 @@ func (s *Server) listAgents(w http.ResponseWriter, r *http.Request, p auth.Princ
 		if !policy.CanUseAgent(p, m) {
 			continue
 		}
-		view := agentView{ID: m.ID, Name: m.Name, Description: m.Description, Tools: m.Tools, Approval: []string{}, Starters: m.Starters}
+		view := agentView{ID: m.ID, Name: m.Name, Description: m.Description, Tools: m.Tools, Approval: []string{}, Starters: m.Starters, Preview: m.Preview != nil}
 		for tool, d := range m.Policy.Tools {
 			if d == agents.Ask {
 				view.Approval = append(view.Approval, tool)
@@ -117,31 +122,53 @@ func (s *Server) agent(r *http.Request, p auth.Principal, id string) (agents.Man
 	return m, nil
 }
 
-func (s *Server) scope(r *http.Request, p auth.Principal) (ipc.SessionScope, error) {
-	m, err := s.agent(r, p, r.PathValue("agent"))
-	return ipc.SessionScope{Tenant: p.Tenant, AgentID: m.ID}, err
+// session resolves a session of the principal's own and checks that the principal may use the
+// agent it is bound to. Sessions are per user; the binding still decides who may open them.
+func (s *Server) session(r *http.Request, p auth.Principal) (ipc.SessionParams, error) {
+	params := ipc.SessionParams{TenantParams: ipc.TenantParams{Tenant: p.Tenant}, SessionID: r.PathValue("session")}
+	var info ipc.SessionInfo
+	if err := s.Runtime.Call(r.Context(), ipc.MethodSessionInfo, params, &info); err != nil {
+		return params, err
+	}
+	if info.AgentID != "" {
+		if _, err := s.agent(r, p, info.AgentID); err != nil {
+			return params, err
+		}
+	}
+	return params, nil
 }
 
 func (s *Server) listSessions(w http.ResponseWriter, r *http.Request, p auth.Principal) error {
-	scope, err := s.scope(r, p)
-	if err != nil {
+	var raw []json.RawMessage
+	if err := s.Runtime.Call(r.Context(), ipc.MethodSessionList, ipc.TenantParams{Tenant: p.Tenant}, &raw); err != nil {
 		return err
 	}
-	var out json.RawMessage
-	if err := s.Runtime.Call(r.Context(), ipc.MethodSessionList, scope, &out); err != nil {
-		return err
+	// Only sessions of agents this principal may use (and that still exist) are listed.
+	visible := make([]json.RawMessage, 0, len(raw))
+	for _, item := range raw {
+		var head struct {
+			AgentID string `json:"agentId"`
+		}
+		if json.Unmarshal(item, &head) != nil {
+			continue
+		}
+		if head.AgentID != "" {
+			if m, ok := s.Agents.Get(head.AgentID); !ok || !policy.CanUseAgent(p, m) {
+				continue
+			}
+		}
+		visible = append(visible, item)
 	}
-	writeRaw(w, http.StatusOK, out)
+	writeJSON(w, http.StatusOK, visible)
 	return nil
 }
 
 func (s *Server) getSession(w http.ResponseWriter, r *http.Request, p auth.Principal) error {
-	scope, err := s.scope(r, p)
+	params, err := s.session(r, p)
 	if err != nil {
 		return err
 	}
 	var out json.RawMessage
-	params := ipc.SessionParams{SessionScope: scope, SessionID: r.PathValue("session")}
 	if err := s.Runtime.Call(r.Context(), ipc.MethodSessionGet, params, &out); err != nil {
 		return err
 	}
@@ -149,17 +176,80 @@ func (s *Server) getSession(w http.ResponseWriter, r *http.Request, p auth.Princ
 	return nil
 }
 
-func (s *Server) deleteSession(w http.ResponseWriter, r *http.Request, p auth.Principal) error {
-	scope, err := s.scope(r, p)
+// updateSession accepts {"name"?: string, "pinned"?: bool}. Renaming a session that has an active
+// run is refused by the runtime (409): it would fork pi's session entry tree.
+func (s *Server) updateSession(w http.ResponseWriter, r *http.Request, p auth.Principal) error {
+	session, err := s.session(r, p)
 	if err != nil {
 		return err
 	}
-	params := ipc.SessionParams{SessionScope: scope, SessionID: r.PathValue("session")}
+	var body struct {
+		Name   *string `json:"name"`
+		Pinned *bool   `json:"pinned"`
+	}
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&body); err != nil || (body.Name == nil && body.Pinned == nil) {
+		return apiError{http.StatusBadRequest, "invalid_update", `body must set "name" and/or "pinned"`}
+	}
+	params := ipc.SessionUpdateParams{SessionParams: session, Name: body.Name, Pinned: body.Pinned}
+	if err := s.Runtime.Call(r.Context(), ipc.MethodSessionUpdate, params, nil); err != nil {
+		return err
+	}
+	s.Log.Info("audit: session updated", "workspace", p.Tenant.Workspace, "user", p.Tenant.UserID, "session", session.SessionID,
+		"renamed", body.Name != nil, "pinned", body.Pinned)
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	return nil
+}
+
+func (s *Server) deleteSession(w http.ResponseWriter, r *http.Request, p auth.Principal) error {
+	params, err := s.session(r, p)
+	if err != nil {
+		return err
+	}
 	if err := s.Runtime.Call(r.Context(), ipc.MethodSessionDelete, params, nil); err != nil {
 		return err
 	}
-	s.Log.Info("audit: session deleted", "workspace", p.Tenant.Workspace, "user", p.Tenant.UserID, "agent", scope.AgentID, "session", params.SessionID)
+	s.Log.Info("audit: session deleted", "workspace", p.Tenant.Workspace, "user", p.Tenant.UserID, "session", params.SessionID)
 	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+func (s *Server) listArtifacts(w http.ResponseWriter, r *http.Request, p auth.Principal) error {
+	params, err := s.session(r, p)
+	if err != nil {
+		return err
+	}
+	var out json.RawMessage
+	if err := s.Runtime.Call(r.Context(), ipc.MethodArtifactList, params, &out); err != nil {
+		return err
+	}
+	writeRaw(w, http.StatusOK, out)
+	return nil
+}
+
+// getArtifact returns {revision, bytes, createdAt, html} as JSON. Artifacts are model-written pages, so
+// they are never served as text/html from this origin; the console renders them in a sandboxed iframe.
+// "latest" names the newest revision.
+func (s *Server) getArtifact(w http.ResponseWriter, r *http.Request, p auth.Principal) error {
+	session, err := s.session(r, p)
+	if err != nil {
+		return err
+	}
+	params := ipc.ArtifactParams{SessionParams: session}
+	if rev := r.PathValue("revision"); rev != "latest" {
+		n, err := strconv.Atoi(rev)
+		if err != nil || n < 1 {
+			return apiError{http.StatusBadRequest, "invalid_revision", "revision must be a positive integer or latest"}
+		}
+		params.Revision = &n
+	}
+	var out json.RawMessage
+	if err := s.Runtime.Call(r.Context(), ipc.MethodArtifactGet, params, &out); err != nil {
+		return err
+	}
+	w.Header().Set("Cache-Control", "private, no-store")
+	writeRaw(w, http.StatusOK, out)
 	return nil
 }
 

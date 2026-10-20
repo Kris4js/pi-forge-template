@@ -65,6 +65,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeRaw(w http.ResponseWriter, status int, raw []byte) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(status)
 	_, _ = w.Write(raw)
 }

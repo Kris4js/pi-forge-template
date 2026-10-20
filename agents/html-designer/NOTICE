@@ -1,0 +1,9 @@
+html-designer is adapted from fx0 (https://github.com/vercel-labs/fx0), Copyright Vercel, Inc.,
+licensed under the Apache License, Version 2.0 (http://www.apache.org/licenses/LICENSE-2.0).
+Adapted parts: the system prompt (prompt.md), the read/publish/edit design tool contracts (tools.ts),
+the HTML artifact validator (runtime/src/artifacts/validate.ts) and the draft preview sanitizer
+(web/src/lib/draft-preview.ts). Changes: removed libfx durability, billing, sign-in and multi-user
+steering; adapted to pi-forge's runtime, artifact store and preview.
+
+The design-system skills in skills/ are VoltAgent/awesome-design-md (https://github.com/VoltAgent/awesome-design-md)
+as shipped in fx0's lib/design-md, MIT License (see skills/LICENSE), wrapped with pi skill frontmatter.

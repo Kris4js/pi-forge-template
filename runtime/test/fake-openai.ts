@@ -10,7 +10,8 @@ import type { AddressInfo } from "node:net";
  */
 type ChatMessage = { role: string; content?: unknown; tool_call_id?: string; name?: string };
 
-export async function startFakeOpenAI(): Promise<{ baseUrl: string; close: () => Promise<void> }> {
+export async function startFakeOpenAI(options: { chunkDelayMs?: number } = {}): Promise<{ baseUrl: string; close: () => Promise<void> }> {
+  const pause = () => (options.chunkDelayMs ? new Promise((r) => setTimeout(r, options.chunkDelayMs)) : undefined);
   let calls = 0;
   const server: Server = createServer((req, res) => {
     if (req.method !== "POST" || !req.url?.endsWith("/chat/completions")) {
@@ -20,7 +21,7 @@ export async function startFakeOpenAI(): Promise<{ baseUrl: string; close: () =>
     let raw = "";
     req.setEncoding("utf8");
     req.on("data", (chunk) => (raw += chunk));
-    req.on("end", () => {
+    req.on("end", async () => {
       const body = JSON.parse(raw) as { model: string; messages: ChatMessage[] };
       res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
       const id = `chatcmpl-${++calls}`;
@@ -36,7 +37,11 @@ export async function startFakeOpenAI(): Promise<{ baseUrl: string; close: () =>
           role: "assistant",
           tool_calls: [{ index: 0, id: `call_${calls}`, type: "function", function: { name: reply.tool.name, arguments: "" } }],
         });
-        chunk({ tool_calls: [{ index: 0, function: { arguments: JSON.stringify(reply.tool.args) } }] });
+        // Arguments arrive in pieces, as from a real model, so incremental parsing is exercised.
+        for (const piece of JSON.stringify(reply.tool.args).match(/[\s\S]{1,40}/g) ?? []) {
+          chunk({ tool_calls: [{ index: 0, function: { arguments: piece } }] });
+          await pause();
+        }
         chunk({}, "tool_calls");
       } else {
         chunk({ role: "assistant", content: "" });

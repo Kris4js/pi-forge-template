@@ -22,6 +22,7 @@ agents/<id>/
   "model": { "provider": "anthropic", "id": "claude-sonnet-5-5", "thinkingLevel": "low" },  // 可选，默认使用 .env 中的配置
   "tools": ["search_kb", "create_ticket"],   // 白名单：pi 内置工具(read/ls/grep/find/edit/write/bash) + tools.ts 中定义的工具
   "memory": { "compaction": true },          // 是否开启 pi auto-compaction，默认开启
+  "preview": { "tool": "publish_design", "argument": "html" },  // 可选：该工具的该参数流式转发为页面草稿
   "policy": {                                // 由 gateway 执行
     "tools": { "search_kb": "allow", "create_ticket": "ask" },   // 白名单内未列出的工具默认 allow
     "maxToolCalls": 8,                       // 单个 run 的工具调用预算
@@ -46,7 +47,8 @@ const tools: AgentToolsFactory = (ctx) => [
     description: "给模型看的说明",
     parameters: Type.Object({ q: Type.String() }),
     async execute(_id, params) {
-      // ctx.tenant / ctx.agentDir（只读资源）/ ctx.agentHome（当前用户可写目录）
+      // ctx.tenant / ctx.agentDir（只读资源）/ ctx.userHome（当前用户可写目录，所有 agent 共用）
+      // ctx.sessionId / ctx.artifacts（会话的 HTML 产物版本，publish 后返回 details.artifact 即可在控制台预览）
       return { content: [{ type: "text", text: `result for ${params.q}` }], details: {} };
     },
   }),

@@ -26,6 +26,8 @@ export type Item =
       result?: string;
       status: ToolStatus;
       approval?: Approval;
+      /** Artifact revision this call published. */
+      artifactRevision?: number;
       startedAt?: number;
       durationMs?: number;
     }
@@ -50,7 +52,7 @@ export function fromTranscript(messages: TranscriptMessage[]): Item[] {
       }
     } else {
       const tool = items.find((i): i is Extract<Item, { kind: "tool" }> => i.kind === "tool" && i.id === m.toolCallId);
-      if (tool) Object.assign(tool, { result: m.text, status: m.isError ? "error" : "success" });
+      if (tool) Object.assign(tool, { result: m.text, status: m.isError ? "error" : "success", artifactRevision: m.artifactRevision });
     }
   }
   return items;
@@ -104,6 +106,8 @@ export function applyEvent(items: Item[], e: RunEvent, ctx: { now: number; model
         status: t.status === "denied" ? "denied" : e.isError ? "error" : "success",
         durationMs: t.startedAt ? ctx.now - t.startedAt : undefined,
       }));
+    case "artifact":
+      return updateTool(e.toolCallId, () => ({ artifactRevision: e.revision }));
     case "compaction":
       return e.phase === "end" ? [...next, { kind: "summary", key: key(), text: "上下文已由 pi 自动压缩" }] : next;
     case "run_finished":

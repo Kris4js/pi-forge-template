@@ -38,19 +38,22 @@ export type TenantPaths = {
   workspaceDir: string;
   /** <data>/workspaces/<ws>/AGENTS.md — workspace-wide instructions shared by every user and agent. */
   workspaceInstructions: string;
-  /** <data>/workspaces/<ws>/users/<user>/agents/<agent> — cwd of the agent's tools. */
-  agentHome: string;
-  /** pi SessionManager JSONL files. */
+  /** <data>/workspaces/<ws>/users/<user> — the last level: shared by all of the user's agents, cwd of their tools. */
+  userHome: string;
+  /** pi SessionManager JSONL files of every agent the user talks to. */
   sessionDir: string;
+  /** Console preferences about sessions (pinned ids); not part of any session. */
+  pinsFile: string;
 };
 
-export function tenantPaths(dataDir: string, scope: SessionScope): TenantPaths {
-  const workspaceDir = join(resolve(dataDir), "workspaces", scope.tenant.workspace);
-  const agentHome = join(workspaceDir, "users", scope.tenant.userId, "agents", scope.agentId);
+export function tenantPaths(dataDir: string, tenant: Tenant): TenantPaths {
+  const workspaceDir = join(resolve(dataDir), "workspaces", tenant.workspace);
+  const userHome = join(workspaceDir, "users", tenant.userId);
   return {
     workspaceDir,
     workspaceInstructions: join(workspaceDir, "AGENTS.md"),
-    agentHome,
-    sessionDir: join(agentHome, "sessions"),
+    userHome,
+    sessionDir: join(userHome, "sessions"),
+    pinsFile: join(userHome, "pins.json"),
   };
 }

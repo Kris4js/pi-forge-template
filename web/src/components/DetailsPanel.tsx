@@ -23,9 +23,9 @@ export function DetailsPanel({ agent, identity, model, sessionId, runId, items, 
 
   return (
     <aside className="details" aria-label="运行详情">
-      <header>
+      <header className="details-header">
         <strong>运行详情</strong>
-        <Button size="icon" aria-label="关闭详情" icon={<X size={16} />} onClick={onClose} />
+        <Button size="icon" title="关闭详情" aria-label="关闭详情" icon={<X size={16} />} onClick={onClose} />
       </header>
 
       <section>
@@ -158,7 +158,7 @@ export function DetailsPanel({ agent, identity, model, sessionId, runId, items, 
           存储
         </h3>
         <p className="hint mono small">
-          .data/workspaces/{identity.workspace || "demo"}/users/{identity.userId || "anonymous"}/agents/{agent?.id ?? "…"}/sessions/
+          .data/workspaces/{identity.workspace || "demo"}/users/{identity.userId || "anonymous"}/sessions/
         </p>
       </section>
     </aside>

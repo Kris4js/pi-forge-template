@@ -17,7 +17,7 @@ const (
 var ErrMissingUser = errors.New("missing user id")
 
 // Tenant is the identity the runtime partitions storage by:
-// <data>/workspaces/<Workspace>/users/<UserID>/agents/<agent>/sessions.
+// <data>/workspaces/<Workspace>/users/<UserID>/sessions (shared by all of the user's agents).
 type Tenant struct {
 	Workspace string `json:"workspace"`
 	UserID    string `json:"userId"`
