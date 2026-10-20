@@ -234,12 +234,12 @@ export function App() {
     setModal(undefined);
   }
 
-  async function send(text: string, files: File[] = []) {
+  async function send(text: string, files: File[] = [], onUploaded?: () => void) {
     if (!agentId || (!text.trim() && !files.length) || busy) return;
     const attachments = await encodeAttachments(files);
-    const displayText = [text, ...files.filter((file) => !/\.(png|jpe?g|webp)$/i.test(file.name)).map((file) => `📎 ${file.name}`)].filter(Boolean).join("\n");
+    const fileAssets = attachments.map((file, index) => ({ name: file.name, mimeType: file.mimeType, size: files[index]!.size })).filter((file) => !file.mimeType.startsWith("image/"));
     setNotice(undefined);
-    setItems((prev) => [...prev, userItem(displayText)]);
+    setItems((prev) => [...prev, userItem(text, fileAssets)]);
     requestAnimationFrame(() => scroll.scrollToBottom(true));
     const controller = new AbortController();
     abortRef.current = controller;
@@ -253,6 +253,7 @@ export function App() {
         { agentId, sessionId, text, attachments, imageModel: agentId === "image-designer" ? imageModel || undefined : undefined, model: modelKey || undefined, thinkingLevel: effort || undefined },
         (event) => {
           if (event.type === "run") {
+            onUploaded?.();
             setRunId(event.runId);
             setSessionId(event.sessionId);
             runSession = event.sessionId;

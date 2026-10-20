@@ -22,7 +22,7 @@ export async function getImageAsset(userHome: string, sessionId: string, id: str
     const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
     try {
       const stat = await handle.stat();
-      if (!stat.isFile() || stat.size > 4 * 1024 * 1024) throw new Error("invalid size");
+      if (!stat.isFile() || stat.size > 50 * 1024 * 1024) throw new Error("invalid size");
       const data = await handle.readFile();
       return { name: meta.name, mimeType: meta.mimeType, data: data.toString("base64") };
     } finally { await handle.close(); }

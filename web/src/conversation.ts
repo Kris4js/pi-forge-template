@@ -1,11 +1,11 @@
-import type { ImageAsset, RunEvent, TranscriptMessage, Usage } from "./api";
+import type { FileAsset, ImageAsset, RunEvent, TranscriptMessage, Usage } from "./api";
 
 export type ToolStatus = "running" | "pending" | "success" | "error" | "denied";
 
 export type Approval = { state: "pending" | "approved" | "rejected"; reason?: string; by?: string; expiresAt?: string };
 
 export type Item =
-  | { kind: "user"; key: string; text: string; at?: number; images?: ImageAsset[] }
+  | { kind: "user"; key: string; text: string; at?: number; images?: ImageAsset[]; files?: FileAsset[] }
   | {
       kind: "assistant";
       key: string;
@@ -42,7 +42,7 @@ const key = () => `i${++seq}`;
 export function fromTranscript(messages: TranscriptMessage[]): Item[] {
   const items: Item[] = [];
   for (const m of messages) {
-    if (m.role === "user") items.push({ kind: "user", key: key(), text: m.text, at: m.timestamp, images: m.images });
+    if (m.role === "user") items.push({ kind: "user", key: key(), text: m.text, at: m.timestamp, images: m.images, files: m.files });
     else if (m.role === "summary") items.push({ kind: "summary", key: key(), text: m.text });
     else if (m.role === "assistant") {
       if (m.text || m.thinking || m.error) {
@@ -59,8 +59,8 @@ export function fromTranscript(messages: TranscriptMessage[]): Item[] {
   return items;
 }
 
-export function userItem(text: string): Item {
-  return { kind: "user", key: key(), text, at: Date.now() };
+export function userItem(text: string, files?: FileAsset[]): Item {
+  return { kind: "user", key: key(), text, at: Date.now(), files: files?.length ? files : undefined };
 }
 
 /** Fold one streamed run event into the item list (immutably). */

@@ -15,6 +15,8 @@ test("attachment validation rejects traversal, disguised files, invalid base64 a
   assert.equal(validateAttachments(undefined).length, 0);
   assert.equal(validateAttachments([text, png]).length, 2);
   assert.equal(validateAttachments(Array(20).fill(png)).length, 20);
+  assert.throws(() => validateAttachments([{ name: "fake.pdf", mimeType: "application/pdf", data: text.data }]));
+  assert.throws(() => validateAttachments([{ name: "fake.docx", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", data: text.data }]));
   for (const files of [
     [{ ...text, name: "../escape.txt" }],
     [{ ...png, data: text.data }],
@@ -23,7 +25,7 @@ test("attachment validation rejects traversal, disguised files, invalid base64 a
     [{ ...text, data: Buffer.from([255]).toString("base64") }],
     [{ ...text, data: Buffer.alloc(100_001, 65).toString("base64") }],
     Array(21).fill(text),
-    [{ ...png, data: "A".repeat(6 * 1024 * 1024) }],
+    [{ ...png, data: "A".repeat(68 * 1024 * 1024) }],
   ]) assert.throws(() => validateAttachments(files));
 });
 

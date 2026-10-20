@@ -26,8 +26,9 @@ export type SessionSummary = {
 
 export type ImageModels = { models: string[]; defaultModel: string; configured: boolean };
 export type ImageAsset = { id: string; name: string; mimeType: string };
+export type FileAsset = { name: string; mimeType: string; size?: number };
 export type TranscriptMessage =
-  | { role: "user"; text: string; timestamp?: number; images?: ImageAsset[] }
+  | { role: "user"; text: string; timestamp?: number; images?: ImageAsset[]; files?: FileAsset[] }
   | { role: "assistant"; text: string; thinking?: string; toolCalls?: { id: string; name: string; args: unknown }[]; error?: string }
   | { role: "tool"; toolCallId: string; toolName: string; text: string; isError: boolean; artifactRevision?: number; images?: ImageAsset[] }
   | { role: "summary"; text: string };

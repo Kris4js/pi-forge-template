@@ -612,6 +612,94 @@ kbd {
   overflow-wrap: anywhere;
 }
 
+/* Long questions fold to 8 lines and fade out until expanded. */
+.user-text.folded {
+  max-height: calc(1.75em * 8);
+  overflow: hidden;
+}
+.user-text.faded {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 3.5em), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 3.5em), transparent);
+}
+
+.user-text-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-top: 2px;
+  padding: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--cds-text-secondary);
+  background: none;
+  cursor: pointer;
+}
+.user-text-toggle:hover { color: var(--cds-text-primary); }
+.user-text-toggle svg { transition: transform 150ms; }
+.user-text-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
+
+/* Sent attachments sit above the bubble as cards: type icon, name, then type · size. */
+.user-files {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  max-width: 82%;
+  margin-bottom: 6px;
+}
+
+.file-card {
+  --file-accent: var(--cds-text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 260px;
+  max-width: 100%;
+  padding: 10px 14px 10px 10px;
+  border: 1px solid var(--cds-border-subtle);
+  border-radius: 12px;
+  background: var(--cds-surface-0);
+  box-shadow: var(--cds-shadow-sm);
+}
+.file-card[data-type="pdf"] { --file-accent: #e5483d; }
+.file-card[data-type="docx"] { --file-accent: #2b6fd6; }
+.file-card[data-type="xlsx"], .file-card[data-type="csv"] { --file-accent: #1f8a4c; }
+.file-card[data-type="pptx"] { --file-accent: #d9622b; }
+
+.file-card-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 9px;
+  color: var(--file-accent);
+  background: color-mix(in srgb, var(--file-accent) 12%, transparent);
+}
+.file-card-icon img.file-icon { width: 24px; height: 26px; object-fit: contain; }
+
+.file-card-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.4;
+}
+
+.file-card-name {
+  overflow: hidden;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--cds-text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-card-meta {
+  margin-top: 1px;
+  font-size: 12px;
+  color: var(--cds-text-secondary);
+}
+
 .user-actions {
   opacity: 0;
   margin-top: 2px;
@@ -987,6 +1075,8 @@ kbd {
 }
 
 .composer {
+  min-width: 0;
+  max-width: 100%;
   padding: 14px 14px 10px;
   border-radius: var(--radius-composer);
   background: var(--cds-surface-3);
@@ -1403,7 +1493,7 @@ kbd {
 
 
 
-  .user-bubble {
+  .user-bubble, .user-files {
     max-width: 92%;
   }
 
@@ -2162,22 +2252,29 @@ span.preview-version {
 .attachment-add:disabled { opacity: .45; cursor: not-allowed; }
 /* Attachments sit flush with the textarea edges and scroll sideways once they overflow. */
 .composer-attachments {
-  display: flex; gap: 8px;
-  margin-bottom: 10px; padding: 0 4px 6px; /* matches the textarea's inset */
+  display: flex; gap: 10px;
+  min-width: 0; max-width: 100%;
+  margin-bottom: 10px; padding: 4px 4px 8px;
   overflow-x: auto; overscroll-behavior-x: contain;
   scrollbar-width: thin;
 }
 .composer-attachment {
-  position: relative; flex: 0 0 auto;
-  width: 112px; height: 112px; overflow: hidden;
+  position: relative; flex: 0 0 128px;
+  min-width: 0; width: 128px; height: 96px; overflow: hidden;
   border: 1px solid var(--cds-border-subtle); border-radius: 10px;
   background: var(--cds-surface-0);
   color: var(--cds-text-secondary);
 }
-.composer-attachment img { display: block; width: 100%; height: 100%; object-fit: cover; }
-.composer-attachment.file { display: flex; flex-direction: column; justify-content: space-between; padding: 10px; }
-.composer-attachment.file > span { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; font-size: 12px; line-height: 1.4; color: var(--cds-text-primary); }
-.composer-attachment small { display: block; margin-top: 2px; color: var(--cds-text-muted); }
+.composer-attachment .attachment-thumbnail { display: block; width: 100%; height: 100%; object-fit: cover; }
+.composer-attachment.file { display: flex; flex-direction: column; justify-content: space-between; align-items: flex-start; padding: 10px; }
+.composer-attachment .file-icon { width: 26px; height: 28px; object-fit: contain; }
+.attachment-file-info { display: block; min-width: 0; width: 100%; font-size: 12px; line-height: 1.4; color: var(--cds-text-primary); }
+.attachment-file-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer-attachment small { display: block; margin-top: 2px; font-size: 10px; color: var(--cds-text-secondary); }
+.attachment-upload-overlay { position: absolute; inset: 0; z-index: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; background: color-mix(in srgb, var(--cds-surface-3) 90%, transparent); color: var(--cds-text-primary); font-size: 11px; }
+.attachment-upload-overlay svg { animation: attachment-spin 1s linear infinite; }
+@keyframes attachment-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .attachment-upload-overlay svg { animation: none; } }
 .composer-attachment button {
   position: absolute; top: 5px; right: 5px;
   display: grid; place-items: center; width: 20px; height: 20px;
@@ -2187,7 +2284,26 @@ span.preview-version {
 .composer-attachment:hover button, .composer-attachment button:focus-visible { opacity: 1; }
 .composer-attachment button:disabled { display: none; }
 @media (hover: none) { .composer-attachment button { opacity: 1; } }
-.attachment-error { padding: 4px 8px; font-size: 12px; color: var(--cds-text-secondary); }
+/* Upload failures: a banner pinned to the top of the page, above every pane. */
+.upload-notice {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  z-index: 100;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(560px, calc(100vw - 32px));
+  padding: 6px 6px 6px 14px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  color: var(--danger);
+  background: linear-gradient(var(--danger-soft), var(--danger-soft)), var(--cds-surface-1);
+  box-shadow: var(--cds-shadow-popover);
+  animation: upload-notice-in 0.15s ease-out;
+}
+@keyframes upload-notice-in { from { opacity: 0; transform: translate(-50%, -6px); } }
 
 /* Shared uploaded/generated image groups; controls stay inside the message. */
 .image-carousel, .image-gallery { max-width: 100%; margin: 8px 0; white-space: normal; }

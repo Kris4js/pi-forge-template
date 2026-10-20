@@ -82,7 +82,7 @@ curl -N -X POST localhost:8090/v1/runs -H 'X-Workspace: acme' -H 'X-User-Id: ali
   -d '{"agentId":"assistant","text":"你好"}'
 ```
 
-附件通过输入框「＋ → 上传照片和文件」选择，随 `/v1/runs` 请求的 `attachments: [{name,mimeType,data}]`（原始 Base64，不含 data URL 前缀）一起发送。支持 PNG/JPEG/WebP 与 UTF-8 的 txt/md/csv/json/yaml/yml/log；最多 20 个，图片单个 4 MB、文本单个 100 KB、总计 80 MB。仅此路由允许 112 MiB 请求体，其他路由仍为 1 MiB。文件落入当前用户的 `attachments/<随机ID>/`；图片作为视觉输入、文本作为附件上下文交给模型。无文字时也可发送；不支持视觉的模型会拒绝图片。首版不支持 PDF/Office 及附件自动清理，删除会话不会删除用户附件。图片消息支持单图展示、多图横向轮播及大图预览（方向键切换、Escape 关闭、下载）；本次起发送的图片引用会随会话持久化，刷新后可恢复。图片通过鉴权的 `GET /v1/sessions/{session}/images/{image}` 读取，不使用公开文件 URL；升级前已发送的图片不自动补建历史引用。
+附件通过输入框「＋ → 上传照片和文件」选择，随 `/v1/runs` 请求的 `attachments: [{name,mimeType,data}]`（原始 Base64，不含 data URL 前缀）一起发送。支持 PNG/JPEG/WebP、DOCX/PDF/XLSX/PPTX 与 UTF-8 的 txt/md/csv/json/yaml/yml/log；最多 20 个，图片及文档单个 4 MB、文本单个 100 KB、总计 80 MB。仅此路由允许 112 MiB 请求体，其他路由仍为 1 MiB。文件落入当前用户的 `attachments/<随机ID>/`；图片作为视觉输入、文本作为附件上下文交给模型。无文字时也可发送；不支持视觉的模型会拒绝图片。首版不支持扫描件 OCR、旧版 .doc/.xls/.ppt、文档在线预览/下载及附件自动清理，删除会话不会删除用户附件。图片消息支持单图展示、多图横向轮播及大图预览（方向键切换、Escape 关闭、下载）；本次起发送的图片引用会随会话持久化，刷新后可恢复。图片通过鉴权的 `GET /v1/sessions/{session}/images/{image}` 读取，不使用公开文件 URL；升级前已发送的图片不自动补建历史引用。
 
 SSE 事件依次为：`run`（runId / sessionId）→ `run_started` → `text_delta` / `thinking_delta` / `tool_start` / `approval_required` / `approval_resolved` / `tool_end` / `message_end` / `compaction` / `artifact_draft` / `artifact` → `run_finished`（`completed | failed | cancelled | timeout`）。
 
@@ -94,6 +94,31 @@ make check    # go vet + tsc
 make build    # bin/gateway + web/dist；FORGE_WEB_DIR=web/dist 时由 gateway 直接托管前端
 ```
 
+
+## 文档解析依赖
+
+文档在发送时由 Python 子进程通过 MarkItDown 0.1.5 提取文本/Markdown，直接作为本轮用户资料提供给模型；原文件与 `.md` 提取结果保存在用户附件目录，历史会话保留提取文本。前端发送等待期间禁用重复提交；解析失败显示具体错误并保留草稿，不静默忽略文件。此版本没有后台任务列表、OCR、向量检索或长文档分段读取。
+
+本地继续使用原有命令：
+
+```bash
+make install  # 安装 npm、Go 及文档解析依赖
+make dev      # 启动网关及 TS runtime
+# 另一终端：make web
+```
+
+`make install` 优先使用 uv 创建 Python 3.12 环境；没有 uv 时使用系统 `python3`（需要 3.10+ 及 venv/pip）。仅单独安装文档依赖时：
+
+```bash
+uv venv --python 3.12 .venv
+uv pip install --python .venv/bin/python -r packages/documents/requirements.txt
+```
+
+运行时自动使用根目录 `.venv/bin/python`，也可设置 `FORGE_DOCUMENT_PYTHON` 指定解释器。Docker 最终镜像改为 Debian slim 并安装隔离 Python 环境；不需要外部解析服务。未安装 Python 依赖时图片和文本附件仍可用，Office/PDF 会明确失败。测试在解释器不存在时跳过真实文档转换用例，请先安装依赖再完整验收。
+
+每个 runtime 同时只允许一个解析子进程，繁忙时明确拒绝；单次发送全部附件解析最多 20 秒，超时杀掉子进程。单文件及本次附件提取文本合计上限 100000 字符，超限要求拆分而非截断。PDF 最多 200 页；Excel 最多 50 个工作表、100000 单元格；Office ZIP 最多 5000 项、64 MiB 声明解压体积。加密文件和带 VBA 的文件拒绝处理。Excel 不重算公式（使用已有缓存值），PPTX/复杂 PDF 不保证表格和布局还原，图片文字不做 OCR。
+
+子进程使用最小环境、不继承 API 密钥、禁用插件及 Python socket 联网，Linux 限制 2 GiB 虚拟地址空间、CPU 30 秒。这是资源与网络访问防护，不是完整操作系统安全沙箱；公网不可信文档生产环境仍应结合容器权限/网络限制。失败时已保存的附件可能保留，暂不自动清理。
 
 ## 图片生成与编辑（OpenRouter）
 
@@ -112,7 +137,7 @@ PI_IMAGE_MODEL_IDS=另一个图片模型ID,第三个图片模型ID
 
 ### 电商详情页工作流
 
-参考 [1click-ecom-detailpage](https://github.com/coolqoo/1click-ecom-detailpage) 的购买驱动诊断、购买理由卡、视觉风格锁和逐屏提示词流程，按本服务的工具能力重新编写提示词，未直接安装其脚本或复制完整 Skill。默认中文、5 张详情图规划，先生成首屏确认风格，再逐屏生成；面向海外市场时按目标语言本地化。缺少真实评价或对比证据时改用产品细节或 FAQ，不沿用参考项目的模拟评价/数据默认行为。
+参考 [1click-ecom-detailpage](https://github.com/coolqoo/1click-ecom-detailpage) 的购买驱动诊断、购买理由卡、视觉风格锁和逐屏提示词流程，按本服务的工具能力重新编写提示词，未直接安装其脚本或复制完整 Skill。默认中文、5 张详情图规划，整组通过一次工具审批后并行生成，不强制先出首屏样张；仅用户要求时分阶段确认，超过单次 10 张时分批调用并分别审批；面向海外市场时按目标语言本地化。缺少真实评价或对比证据时改用产品细节或 FAQ，不沿用参考项目的模拟评价/数据默认行为。
 
 界面显示名为「电商详情页」，内部 ID 保留 `image-designer`，兼容已有会话和图片模型选择。交付为详情分屏图片，不是 HTML 网页。修改定义后重启服务；旧会话沿用历史上下文，新会话更适合使用新流程。
 

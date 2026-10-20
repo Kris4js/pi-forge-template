@@ -1,9 +1,10 @@
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { mkdir, open, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, relative, isAbsolute } from "node:path";
 import { SessionManager, type SessionEntry } from "@earendil-works/pi-coding-agent";
+import { ATTACHMENT_NOTES, attachmentMimeType } from "../attachments.ts";
 import { IMAGE_ENTRY } from "../image-assets.ts";
-import type { ImageAsset } from "../protocol.ts";
+import type { FileAsset, ImageAsset } from "../protocol.ts";
 import { ArtifactStore } from "../artifacts/store.ts";
 import { RpcError } from "../ipc/peer.ts";
 import { ErrorCodes, type SessionDetail, type SessionInfo, type SessionSummary, type TranscriptMessage } from "../protocol.ts";
@@ -94,7 +95,7 @@ export async function getSession(paths: TenantPaths, sessionId: string): Promise
     id: manager.getSessionId(),
     agentId: sessionAgent(manager),
     name: manager.getSessionName(),
-    messages: toTranscript(manager.getBranch()),
+    messages: toTranscript(manager.getBranch(), paths.userHome),
   };
 }
 
@@ -174,9 +175,9 @@ async function findSessionFile(paths: TenantPaths, sessionId: string): Promise<s
 }
 
 /** Active branch (root -> leaf) rendered for display. Compactions appear as a summary marker. */
-function toTranscript(entries: SessionEntry[]): TranscriptMessage[] {
+function toTranscript(entries: SessionEntry[], userHome: string): TranscriptMessage[] {
   const out: TranscriptMessage[] = [];
-  let pending: { text: string; promptText: string; images: ImageAsset[] } | undefined;
+  let pending: { text: string; promptText: string; images: ImageAsset[]; files?: FileAsset[] } | undefined;
   for (const entry of entries) {
     if (entry.type === "custom" && entry.customType === IMAGE_ENTRY) {
       pending = entry.data as typeof pending;
@@ -191,7 +192,9 @@ function toTranscript(entries: SessionEntry[]): TranscriptMessage[] {
     if (message.role === "user") {
       const text = textOf(message.content);
       const matching = pending?.promptText === text ? pending : undefined;
-      out.push({ role: "user", text: matching?.text ?? text, images: matching?.images, timestamp: message.timestamp });
+      const recovered = matching ? undefined : fromAttachmentPrompt(text, userHome);
+      const files = matching?.files ?? recovered?.files;
+      out.push({ role: "user", text: matching?.text ?? recovered!.text, images: matching?.images?.length ? matching.images : undefined, files: files?.length ? files : undefined, timestamp: message.timestamp });
       pending = undefined;
     } else if (message.role === "assistant") {
       const blocks: any[] = Array.isArray(message.content) ? message.content : [];
@@ -224,6 +227,27 @@ function toTranscript(entries: SessionEntry[]): TranscriptMessage[] {
     }
   }
   return out;
+}
+
+/** Sessions recorded before attachment metadata was stored: split the expanded prompt back into typed text and file cards. */
+function fromAttachmentPrompt(prompt: string, userHome: string): { text: string; files?: FileAsset[] } {
+  const at = prompt.indexOf(ATTACHMENT_NOTES);
+  if (at < 0) return { text: prompt };
+  const notes = prompt.slice(at).replace(/<attachment-content name="[^\n]*">[\s\S]*?<\/attachment-content>/g, "");
+  const files: FileAsset[] = [];
+  for (const [, name, path] of notes.matchAll(/^附件 ("(?:[^"\\]|\\.)*")，已保存至 ("(?:[^"\\]|\\.)*")$/gm)) {
+    const file = { name: JSON.parse(name!) as string, path: JSON.parse(path!) as string };
+    if (/\.(png|jpe?g|webp)$/i.test(file.name)) continue;
+    files.push({ name: file.name, mimeType: attachmentMimeType(file.name), size: attachmentSize(userHome, file.path) });
+  }
+  return { text: prompt.slice(0, at), files };
+}
+
+/** Size of a stored attachment, read only from this user's attachment folder. */
+function attachmentSize(userHome: string, path: string): number | undefined {
+  const rel = relative(join(userHome, "attachments"), path);
+  if (!rel || rel.startsWith("..") || isAbsolute(rel)) return undefined;
+  try { return statSync(path).size; } catch { return undefined; }
 }
 
 export function textOf(content: unknown): string {

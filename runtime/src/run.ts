@@ -193,10 +193,10 @@ export class Runner {
       const saved = await saveAttachments(paths.userHome, attachments, session.sessionId);
       text += saved.text;
       if (saved.assets.length) text += `\n图片资产 ID（编辑时使用 referenceIds）：${JSON.stringify(saved.assets)}`;
-      if (saved.assets.length) {
-        sessionManager.appendCustomEntry(IMAGE_ENTRY, { text: params.input.text, promptText: text, images: saved.assets });
-        emit({ type: "images", images: saved.assets });
-      }
+      const files = attachments.filter((file) => !file.mimeType.startsWith("image/")).map((file) => ({ name: file.name, mimeType: file.mimeType, size: Buffer.byteLength(file.data, "base64") }));
+      // Lets the transcript show what the user typed plus attachment cards instead of the expanded prompt.
+      if (saved.assets.length || files.length) sessionManager.appendCustomEntry(IMAGE_ENTRY, { text: params.input.text, promptText: text, images: saved.assets, files });
+      if (saved.assets.length) emit({ type: "images", images: saved.assets });
       images = saved.images;
     } catch (error) {
       run.session?.dispose();

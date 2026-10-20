@@ -1,8 +1,9 @@
 import { Api } from "../api";
 import { ImageGallery } from "./ImageGallery";
+import { FileCard } from "./FileCard";
 import { motion } from "framer-motion";
-import { useMemo } from "react";
-import { CircleAlert, CircleCheck, CircleSlash, Clock3, Coins, RotateCcw, Timer } from "lucide-react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, CircleAlert, CircleCheck, CircleSlash, Clock3, Coins, RotateCcw, Timer } from "lucide-react";
 import type { Item } from "../conversation";
 import { ClaudeMark } from "../lib/icons";
 import { Button, CopyButton, formatDuration, formatTokens } from "../ui";
@@ -92,6 +93,28 @@ function TurnImages({ body, api, sessionId }: { body: Item[]; api: Api; sessionI
   return images.length ? <ImageGallery images={images} api={api} sessionId={sessionId} /> : null;
 }
 
+/** Long questions start folded to a few lines; the toggle only appears when the text actually overflows. */
+function CollapsibleText({ text }: { text: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const [overflows, setOverflows] = useState(false);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || open) return;
+    const check = () => setOverflows(el.scrollHeight > el.clientHeight + 1);
+    check();
+    const observer = new ResizeObserver(check);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [text, open]);
+  return <>
+    <div ref={ref} className={`user-text${open ? "" : " folded"}${overflows && !open ? " faded" : ""}`}>{text}</div>
+    {overflows && <button type="button" className="user-text-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
+      {open ? "收起" : "展开全部"}<ChevronDown size={14} />
+    </button>}
+  </>;
+}
+
 function UserMessage({ item, api, sessionId }: { item: User; api: Api; sessionId?: string }) {
   return (
     <motion.div
@@ -100,10 +123,11 @@ function UserMessage({ item, api, sessionId }: { item: User; api: Api; sessionId
       animate={{ opacity: 1, y: 0, scale: 1 }}
       transition={{ type: "spring", stiffness: 520, damping: 38 }}
     >
-      <div className="user-bubble">{item.images?.length && sessionId ? <ImageGallery images={item.images} api={api} sessionId={sessionId} /> : null}{item.text && <div>{item.text}</div>}</div>
-      <div className="user-actions">
+      {item.files?.length ? <div className="user-files">{item.files.map((file, index) => <FileCard key={`${index}-${file.name}`} file={file} />)}</div> : null}
+      {(item.text || (item.images?.length && sessionId)) && <div className="user-bubble">{item.images?.length && sessionId ? <ImageGallery images={item.images} api={api} sessionId={sessionId} /> : null}{item.text && <CollapsibleText text={item.text} />}</div>}
+      {item.text && <div className="user-actions">
         <CopyButton text={item.text} compact />
-      </div>
+      </div>}
     </motion.div>
   );
 }

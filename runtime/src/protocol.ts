@@ -36,6 +36,9 @@ export type SessionScope = TenantParams & { agentId: string };
 export type HelloResult = { protocolVersion: number; runtime: string; model?: string };
 
 export type ImageAsset = { id: string; name: string; mimeType: string };
+/** A non-image attachment as shown on the user's message; the bytes stay in the user's attachment folder. */
+/** `size` is missing only for files recovered from sessions recorded before it was stored. */
+export type FileAsset = { name: string; mimeType: string; size?: number };
 export type Attachment = { name: string; mimeType: string; data: string };
 
 export type RunStartParams = SessionScope & {
@@ -81,7 +84,7 @@ export type SessionSummary = {
 };
 
 export type TranscriptMessage =
-  | { role: "user"; text: string; timestamp?: number; images?: ImageAsset[] }
+  | { role: "user"; text: string; timestamp?: number; images?: ImageAsset[]; files?: FileAsset[] }
   | {
       role: "assistant";
       text: string;

@@ -1,5 +1,6 @@
-import { ArrowUp, Square } from "lucide-react";
+import { ArrowUp, Square, X } from "lucide-react";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { Agent, ModelsResult } from "../api";
 import { agentIcon } from "../lib/icons";
 import type { ImageModels } from "../api";
@@ -26,7 +27,7 @@ type Props = {
   busy: boolean;
   placeholder?: string;
   autoFocus?: boolean;
-  onSend: (text: string, files: File[]) => Promise<void>;
+  onSend: (text: string, files: File[], onUploaded?: () => void) => Promise<void>;
   onStop: () => void;
 };
 
@@ -36,6 +37,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
 ) {
   const [text, setText] = useState("");
   const [files, setFiles] = useState<File[]>([]);
+  const [uploading, setUploading] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const area = useRef<HTMLTextAreaElement>(null);
@@ -59,17 +61,25 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     el.style.height = `${el.scrollHeight}px`;
   }, [text]);
 
+  // The upload notice sits at the top of the page and dismisses itself.
+  useEffect(() => {
+    if (!error) return;
+    const timer = setTimeout(() => setError(""), 6000);
+    return () => clearTimeout(timer);
+  }, [error]);
+
   const submit = async () => {
     if ((!text.trim() && !files.length) || busy || sending || !agent) return;
     setSending(true);
+    setUploading(files.length > 0);
     setError("");
     try {
-      await onSend(text, files);
+      await onSend(text, files, () => { setUploading(false); setFiles([]); });
       setText("");
       setFiles([]);
     } catch (error) {
       setError((error as Error).message);
-    } finally { setSending(false); }
+    } finally { setSending(false); setUploading(false); }
   };
 
   return (
@@ -80,8 +90,11 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         submit();
       }}
     >
-      {files.length > 0 && <div className="composer-attachments">{files.map((file, index) => <AttachmentPreview key={`${index}-${file.name}`} file={file} disabled={busy || sending} onRemove={() => setFiles((prev) => prev.filter((_, i) => i !== index))} />)}</div>}
-      {error && <div className="attachment-error" role="alert">{error}</div>}
+      {files.length > 0 && <div className="composer-attachments">{files.map((file, index) => <AttachmentPreview key={`${index}-${file.name}`} file={file} uploading={uploading} disabled={busy || sending} onRemove={() => setFiles((prev) => prev.filter((_, i) => i !== index))} />)}</div>}
+      {error && createPortal(<div className="upload-notice" role="alert">
+        <span>{error}</span>
+        <Button size="icon" aria-label="关闭提示" icon={<X size={14} />} onClick={() => setError("")} />
+      </div>, document.body)}
       <textarea
         ref={area}
         value={text}
@@ -112,7 +125,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       />
       <div className="composer-tools">
         <div className="composer-left">
-          <AttachmentButton files={files} onChange={setFiles} disabled={!agent || busy || sending} />
+          <AttachmentButton files={files} onChange={setFiles} onError={setError} disabled={!agent || busy || sending} />
           {agent?.id === "image-designer" && <DropdownMenu>
             <DropdownMenuTrigger className="selector-trigger" aria-label="图片模型" title={imageModel || "请配置 PI_IMAGE_MODEL_ID 和 PI_IMAGE_API_KEY"} disabled={!imageModels?.configured}>
               <span className="selector-label">{imageModel?.split("/").at(-1) || "图片模型未配置"}</span>
