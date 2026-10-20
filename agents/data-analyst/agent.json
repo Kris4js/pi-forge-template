@@ -1,0 +1,25 @@
+{
+  "id": "data-analyst",
+  "name": "经营分析",
+  "description": "基于 pi skills 的分析 agent：按需读取分析方法论（SKILL.md），用 query_sales 查询示例销售数据。",
+  "tools": [
+    "read",
+    "query_sales"
+  ],
+  "memory": {
+    "compaction": true
+  },
+  "policy": {
+    "tools": {
+      "read": "allow",
+      "query_sales": "allow"
+    },
+    "maxToolCalls": 20,
+    "timeoutMs": 300000
+  },
+  "starters": [
+    "对比 9/8-9/14 和 9/1-9/7 的销售额，哪里下滑了？",
+    "小程序渠道的生鲜下滑主要是哪个门店拖累的？",
+    "先帮我检查一下这份销售数据的质量"
+  ]
+}

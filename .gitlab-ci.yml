@@ -4,20 +4,14 @@ stages:
 
 variables:
   DOCKER_BUILDKIT: "1"
-  COMPOSE_PROJECT_NAME: "pi-agent-service"
+  COMPOSE_PROJECT_NAME: "pi-forge"
   GIT_CLEAN_FLAGS: "none"
-
-cache:
-  key:
-    files:
-      - package-lock.json
-  paths:
-    - .npm/
 
 test:
   stage: test
   script:
-    - docker run --rm --user "$(id -u):$(id -g)" -v "$CI_PROJECT_DIR:/workspace" -w /workspace node:22-alpine sh -c "npm ci --cache .npm --prefer-offline && npm run check"
+    - docker run --rm -v "$CI_PROJECT_DIR:/workspace" -w /workspace/gateway golang:1.23-alpine go test ./...
+    - docker run --rm --user "$(id -u):$(id -g)" -v "$CI_PROJECT_DIR:/workspace" -w /workspace node:22-alpine sh -c "npm ci --cache .npm --prefer-offline && npm run check && npm test"
 
 deploy:
   stage: deploy
@@ -28,14 +22,10 @@ deploy:
     - ./scripts/write-ci-env.sh
     - docker network create wjl-net 2>/dev/null || true
     - docker compose up -d --build
-    - docker compose ps
     - |
       for i in $(seq 1 30); do
-        if curl -fsS http://localhost:8090/api/state >/dev/null; then
-          exit 0
-        fi
+        if curl -fsS http://localhost:8090/healthz >/dev/null; then exit 0; fi
         sleep 2
       done
-      docker compose ps
-      docker compose logs --tail=200 pi-agent-service
+      docker compose logs --tail=200 pi-forge
       exit 1

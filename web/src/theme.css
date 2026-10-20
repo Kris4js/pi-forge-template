@@ -1,0 +1,165 @@
+/*
+ * Design tokens adapted from open-claude-ui (CDS theme + chat-app warm surfaces).
+ * Copyright (c) 2026 Caho1 — MIT License. https://github.com/Caho1/open-claude-ui
+ */
+
+:root {
+  --cds-surface-0: #f7f7f5;
+  --cds-surface-1: #fcfcfb;
+  --cds-surface-2: #fbfbfa;
+  --cds-surface-3: #ffffff;
+  --cds-surface-popover: #ffffff;
+
+  --cds-clay: #d97757;
+  --cds-clay-hover: #cc5a36;
+  --cds-clay-light: #fbf3ef;
+  --app-action: #b2563a;
+  --app-on-accent: #fcfcfb;
+
+  --cds-alpha-1: hsla(0, 0%, 8%, 0.05);
+  --cds-alpha-2: hsla(0, 0%, 8%, 0.1);
+  --cds-alpha-3: hsla(0, 0%, 8%, 0.2);
+  --cds-border: var(--cds-alpha-2);
+  --cds-border-subtle: var(--cds-alpha-2);
+  --cds-border-strong: var(--cds-alpha-3);
+
+  --cds-shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05), 0 2px 8px 0 rgba(0, 0, 0, 0.08);
+  --cds-shadow-md: 0 2px 4px 0 rgba(0, 0, 0, 0.05), 0 6px 16px 0 rgba(0, 0, 0, 0.08);
+  --cds-shadow-popover: 0 0 0 1px var(--cds-border), 0 8px 24px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(0, 0, 0, 0.08);
+  --cds-panel-shadow: 0 0 0 1px var(--cds-border), var(--cds-shadow-sm);
+  --cds-shadow-composer: 0 4px 20px rgba(0, 0, 0, 0.035), inset 0 0 0 1px var(--cds-border);
+  --cds-shadow-composer-hover: 0 4px 24px rgba(0, 0, 0, 0.06), inset 0 0 0 1px var(--cds-border-strong);
+  --cds-shadow-composer-focus: 0 4px 24px rgba(0, 0, 0, 0.08), inset 0 0 0 1px var(--cds-border-strong),
+    0 0 0 1px var(--cds-border-strong);
+
+  --cds-fill-ghost-hover: var(--cds-alpha-1);
+  --cds-fill-ghost-selected: var(--cds-alpha-2);
+  --cds-fill-secondary: var(--cds-alpha-2);
+  --cds-fill-brand-subtle: var(--cds-clay-light);
+
+  --cds-text-primary: #1f1e1d;
+  --cds-text-secondary: #6b6966;
+  --cds-text-muted: #77756f;
+
+  --ok: #15803d;
+  --ok-soft: #ecfdf3;
+  --info: #2563eb;
+  --info-soft: #eff4ff;
+  --danger: #ad352e;
+  --danger-soft: #fdf0ef;
+  --app-code: #0d0d0c;
+  --app-code-text: #eeede8;
+
+  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-panel: 12px;
+  --radius-bubble: 18px;
+  --radius-composer: 20px;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+
+  --font-sans: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-serif: "Songti SC", "Noto Serif CJK SC", "STSong", Georgia, serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  color-scheme: light;
+}
+
+:root.dark {
+  --cds-surface-0: #1b1b19;
+  --cds-surface-1: #21211e;
+  --cds-surface-2: #282824;
+  --cds-surface-3: #2c2c28;
+  --cds-surface-popover: #2a2a26;
+  --cds-clay: #cc6b49;
+  --cds-clay-hover: #e08264;
+  --cds-clay-light: rgba(217, 119, 87, 0.15);
+
+  --cds-alpha-1: hsla(0, 0%, 100%, 0.05);
+  --cds-alpha-2: hsla(0, 0%, 100%, 0.09);
+  --cds-alpha-3: hsla(0, 0%, 100%, 0.18);
+
+  --cds-shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.4), 0 2px 8px 0 rgba(0, 0, 0, 0.4);
+  --cds-shadow-md: 0 2px 4px 0 rgba(0, 0, 0, 0.4), 0 6px 16px 0 rgba(0, 0, 0, 0.4);
+  --cds-shadow-popover: inset 0 0 0 1px rgba(255, 255, 255, 0.1), 0 8px 28px rgba(0, 0, 0, 0.65),
+    0 2px 8px rgba(0, 0, 0, 0.45);
+  --cds-shadow-composer: 0 4px 20px rgba(0, 0, 0, 0.4), inset 0 0 0 1px var(--cds-border);
+  --cds-shadow-composer-hover: 0 4px 24px rgba(0, 0, 0, 0.55), inset 0 0 0 1px var(--cds-border-strong);
+  --cds-shadow-composer-focus: 0 4px 24px rgba(0, 0, 0, 0.65), inset 0 0 0 1px rgba(255, 255, 255, 0.22),
+    0 0 0 1px rgba(255, 255, 255, 0.22);
+
+  --cds-text-primary: #eeede8;
+  --cds-text-secondary: #b4b2ac;
+  --cds-text-muted: #8f8d86;
+
+  --ok: #4ade80;
+  --ok-soft: rgba(74, 222, 128, 0.1);
+  --info: #60a5fa;
+  --info-soft: rgba(96, 165, 250, 0.12);
+  --danger: #ffaaa2;
+  --danger-soft: rgba(248, 113, 113, 0.12);
+
+  color-scheme: dark;
+}
+
+@keyframes timeline-quiet-dot {
+  0%,
+  8% {
+    opacity: 0.2;
+    transform: translateY(2px);
+  }
+  22% {
+    opacity: 1;
+    transform: translateY(-2.5px);
+  }
+  36%,
+  70% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  90%,
+  100% {
+    opacity: 0.2;
+    transform: translateY(0);
+  }
+}
+
+@keyframes clay-breathe {
+  0%,
+  100% {
+    filter: brightness(0.96);
+    transform: scale(0.92);
+  }
+  50% {
+    filter: brightness(1.08);
+    transform: scale(1.08);
+  }
+}
+
+@keyframes ping {
+  75%,
+  100% {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+}
+
+@keyframes caret-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes skeleton-sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}

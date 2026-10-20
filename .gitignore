@@ -1,8 +1,10 @@
 .env
-
 node_modules
+dist
+bin
 
 .vscode
-.vscode/settings.json
 
+# runtime data (pi session JSONL, user memory)
+.data
 .workspaces

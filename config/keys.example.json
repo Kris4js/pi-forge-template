@@ -1,0 +1,7 @@
+{
+  "keys": [
+    { "id": "acme-alice", "key": "replace-with-a-long-random-secret", "workspace": "acme", "user": "alice", "roles": ["member"] },
+    { "id": "acme-backend", "key": "replace-with-another-secret", "workspace": "acme", "user": "*", "roles": ["member"] },
+    { "id": "platform", "key": "replace-with-a-service-secret", "workspace": "*", "user": "*", "roles": ["admin"] }
+  ]
+}

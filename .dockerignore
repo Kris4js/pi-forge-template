@@ -1,12 +1,8 @@
-node_modules
-npm-debug.log*
-Dockerfile*
-.dockerignore
 .git
-.gitignore
 .env
+.data
 .workspaces
-.pi/skills/*
-dist
-coverage
-.DS_Store
+node_modules
+**/node_modules
+web/dist
+bin

@@ -1,21 +1,16 @@
 {
-  "name": "pi-agent-service",
+  "name": "pi-forge",
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "workspaces": [
+    "runtime",
+    "web"
+  ],
   "scripts": {
-    "demo": "node node_modules/tsx/dist/cli.mjs examples/demo.ts",
-    "chat:once": "node node_modules/tsx/dist/cli.mjs examples/askOnce.ts",
-    "chat:loop": "node node_modules/tsx/dist/cli.mjs examples/askLoop.ts",
-    "check": "node node_modules/typescript/lib/tsc.js --noEmit",
-    "server": "node node_modules/tsx/dist/cli.mjs src/server/main.ts"
-  },
-  "dependencies": {
-    "@earendil-works/pi-coding-agent": "^0.80.3",
-    "@sinclair/typebox": "^0.34.41"
-  },
-  "devDependencies": {
-    "tsx": "^4.19.3",
-    "typescript": "^5.7.3"
+    "check": "npm run check -w runtime && npm run check -w web",
+    "test": "npm test -w runtime",
+    "build": "npm run build -w web",
+    "dev:web": "npm run dev -w web"
   }
 }

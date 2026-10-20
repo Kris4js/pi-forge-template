@@ -1,0 +1,9 @@
+{
+  "id": "assistant",
+  "name": "通用助手",
+  "description": "最小 agent：无工具，只验证对话、流式输出、会话持久化与压缩。",
+  "tools": [],
+  "memory": { "compaction": true },
+  "policy": { "timeoutMs": 120000 },
+  "starters": ["你好，介绍一下你自己", "帮我把这段话改写得更正式：明天开会别迟到"]
+}

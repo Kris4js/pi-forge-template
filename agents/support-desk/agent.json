@@ -1,0 +1,25 @@
+{
+  "id": "support-desk",
+  "name": "客服工单",
+  "description": "检索知识库回答问题；创建工单属于有副作用的操作，需要人工审批。",
+  "tools": [
+    "search_kb",
+    "create_ticket"
+  ],
+  "memory": {
+    "compaction": true
+  },
+  "policy": {
+    "tools": {
+      "search_kb": "allow",
+      "create_ticket": "ask"
+    },
+    "maxToolCalls": 8,
+    "timeoutMs": 180000
+  },
+  "starters": [
+    "怎么申请退款？",
+    "我的订单一直没发货，帮我建个工单",
+    "我手机号换了，旧号已经停机，怎么换绑？"
+  ]
+}

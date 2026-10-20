@@ -1,14 +1,12 @@
 services:
-  pi-agent-service:
+  pi-forge:
     build: .
-    image: pi-agent-service:latest
+    image: pi-forge:latest
     ports:
       - "8090:8090"
     env_file:
       - .env
-    environment:
-      HOST: 0.0.0.0
-      PORT: 8090
     volumes:
-      - ./.workspaces:/app/.workspaces
+      - ./.data:/data
+      - ./config:/app/config:ro
     restart: unless-stopped
