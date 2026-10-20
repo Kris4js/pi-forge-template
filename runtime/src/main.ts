@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { getImageAsset } from "./image-assets.ts";
 import { AgentCatalog } from "./agents/manifest.ts";
 import { ArtifactStore } from "./artifacts/store.ts";
 import { Peer, RpcError } from "./ipc/peer.ts";
@@ -58,6 +59,12 @@ peer.handle(Methods.hello, (): HelloResult => ({
   runtime: "pi-forge-runtime",
   model: models.describeDefault(),
 }));
+peer.handle(Methods.imageGet, async (params: SessionGetParams & { id: string }) => {
+  const paths = scopePaths(params);
+  const sessionId = requireSessionId(params);
+  await getSessionInfo(paths, sessionId);
+  return getImageAsset(paths.userHome, sessionId, params.id);
+});
 peer.handle(Methods.modelsList, () => models.list());
 peer.handle(Methods.runStart, (params: RunStartParams) => runner.start(params));
 peer.handle(Methods.runCancel, (params: RunCancelParams) => runner.cancel(params.runId));

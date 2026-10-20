@@ -17,6 +17,7 @@ export const Methods = {
   sessionDelete: "session.delete",
   sessionUpdate: "session.update",
   artifactList: "artifact.list",
+  imageGet: "image.get",
   artifactGet: "artifact.get",
   // runtime -> gateway
   toolAuthorize: "tool.authorize", // request: the gateway owns the allow/deny decision
@@ -33,6 +34,7 @@ export type SessionScope = TenantParams & { agentId: string };
 
 export type HelloResult = { protocolVersion: number; runtime: string; model?: string };
 
+export type ImageAsset = { id: string; name: string; mimeType: string };
 export type Attachment = { name: string; mimeType: string; data: string };
 
 export type RunStartParams = SessionScope & {
@@ -77,7 +79,7 @@ export type SessionSummary = {
 };
 
 export type TranscriptMessage =
-  | { role: "user"; text: string; timestamp?: number }
+  | { role: "user"; text: string; timestamp?: number; images?: ImageAsset[] }
   | {
       role: "assistant";
       text: string;
@@ -86,7 +88,7 @@ export type TranscriptMessage =
       error?: string;
       timestamp?: number;
     }
-  | { role: "tool"; toolCallId: string; toolName: string; text: string; isError: boolean; artifactRevision?: number }
+  | { role: "tool"; toolCallId: string; toolName: string; text: string; isError: boolean; artifactRevision?: number; images?: ImageAsset[] }
   | { role: "summary"; text: string };
 
 export type SessionInfo = { id: string; agentId?: string };
@@ -124,6 +126,7 @@ export type RunStatus = "completed" | "failed" | "cancelled";
 
 export type RunEvent =
   | { type: "run_started"; sessionId: string; agentId: string; model?: string }
+  | { type: "images"; images: ImageAsset[]; toolCallId?: string }
   | { type: "text_delta"; delta: string }
   | { type: "thinking_delta"; delta: string }
   | { type: "tool_start"; toolCallId: string; toolName: string; args: unknown }

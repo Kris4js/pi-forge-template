@@ -3,6 +3,7 @@ package httpapi
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -55,6 +56,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("DELETE /v1/sessions/{session}", s.authed(s.deleteSession))
 	mux.Handle("GET /v1/sessions/{session}/artifacts", s.authed(s.listArtifacts))
 	mux.Handle("GET /v1/sessions/{session}/artifacts/{revision}", s.authed(s.getArtifact))
+	mux.Handle("GET /v1/sessions/{session}/images/{image}", s.authed(s.getImage))
 	mux.Handle("POST /v1/runs", s.authed(s.startRun))
 	mux.Handle("GET /v1/runs/{run}/events", s.authed(s.runEvents))
 	mux.Handle("POST /v1/runs/{run}/cancel", s.authed(s.cancelRun))
@@ -80,6 +82,38 @@ func (s *Server) authed(h handler) http.Handler {
 			s.writeErr(w, err)
 		}
 	})
+}
+
+func (s *Server) getImage(w http.ResponseWriter, r *http.Request, p auth.Principal) error {
+	params, err := s.session(r, p)
+	if err != nil {
+		return err
+	}
+	var result struct {
+		Name     string `json:"name"`
+		MimeType string `json:"mimeType"`
+		Data     string `json:"data"`
+	}
+	request := struct {
+		ipc.SessionParams
+		ID string `json:"id"`
+	}{params, r.PathValue("image")}
+	if err := s.Runtime.Call(r.Context(), "image.get", request, &result); err != nil {
+		return err
+	}
+	if result.MimeType != "image/png" && result.MimeType != "image/jpeg" && result.MimeType != "image/webp" {
+		return errors.New("invalid image type")
+	}
+	data, err := base64.StdEncoding.DecodeString(result.Data)
+	if err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", result.MimeType)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Cache-Control", "private, no-store")
+	w.WriteHeader(http.StatusOK)
+	_, err = w.Write(data)
+	return err
 }
 
 func (s *Server) me(w http.ResponseWriter, r *http.Request, p auth.Principal) error {

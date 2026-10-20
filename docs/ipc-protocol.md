@@ -10,6 +10,7 @@
 | method | params | result |
 |---|---|---|
 | `runtime.hello` | `{}` | `{protocolVersion, runtime, model?}`，握手时校验协议版本 |
+| `image.get` | `{tenant, sessionId, id}` | `{name,mimeType,data}`，会话及图片必须属于当前用户；data 为 Base64 |
 | `run.start` | `{runId, tenant:{workspace,userId}, agentId, sessionId?, input:{text, attachments?:[{name,mimeType,data}]}}` | `{sessionId}`，表示 run 已被接受，后续进度通过 `run.event` 推送 |
 | `run.cancel` | `{runId}` | `{cancelled}` |
 | `session.list` | `{tenant, agentId}` | `SessionSummary[]` |
@@ -23,7 +24,7 @@
 | request | `tool.authorize` | `{runId, toolCallId, toolName, input}` | `{decision: "allow"\|"deny", reason?}`，gateway 可以挂起直到人工审批完成 |
 | notification | `run.event` | `{runId, seq, event}` | — |
 
-`event.type`：`run_started`、`text_delta`、`thinking_delta`、`tool_start`、`tool_end`、`message_end`、`compaction`、`run_finished`。每个 run 恰好以一个 `run_finished{status, error?, usage}` 结束。
+`event.type`：`images`（`{images:[{id,name,mimeType}], toolCallId?}`，无 toolCallId 为本轮用户上传，有则为工具生成结果）、`run_started`、`text_delta`、`thinking_delta`、`tool_start`、`tool_end`、`message_end`、`compaction`、`run_finished`。每个 run 恰好以一个 `run_finished{status, error?, usage}` 结束。
 
 时序保证：同一个 run 的 notification 按发送顺序处理；`tool_start` 一定先于对应的 `tool.authorize` 到达。
 

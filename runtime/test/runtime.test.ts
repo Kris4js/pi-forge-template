@@ -329,8 +329,17 @@ test("attachments cross IPC into the model and remain isolated from other users"
   assert.equal((events.get(runId)!.at(-1) as { status: string }).status, "completed");
   assert.match(JSON.stringify(lastModelRequest), /data:image\/png;base64,/);
   assert.match(JSON.stringify(lastModelRequest), /capacity 500ml/);
+  const imageEvent = events.get(runId)!.find((event) => event.type === "images");
+  assert.ok(imageEvent && imageEvent.type === "images");
+  const asset = imageEvent.images[0]!;
+  const stored = await peer.request<{ data: string; mimeType: string }>("image.get", { tenant, sessionId: started.sessionId, id: asset.id });
+  assert.equal(stored.data, data);
+  assert.equal(stored.mimeType, "image/png");
+  await assert.rejects(peer.request("image.get", { tenant: { ...tenant, userId: "u2" }, sessionId: started.sessionId, id: asset.id }));
+  await assert.rejects(peer.request("image.get", { tenant, sessionId: started.sessionId, id: "../../.env" }));
   const detail = await peer.request<SessionDetail>("session.get", { tenant, sessionId: started.sessionId });
   assert.match(JSON.stringify(detail.messages), /product.png/);
+  assert.deepEqual(detail.messages.find((message) => message.role === "user" && message.images?.length), { role: "user", text: "", images: [asset], timestamp: detail.messages.find((message) => message.role === "user")?.timestamp });
   await assert.rejects(peer.request("session.get", { tenant: { ...tenant, userId: "u2" }, sessionId: started.sessionId }));
   await assert.rejects(peer.request("run.start", { runId: "invalid-attachment", tenant, agentId: "assistant", input: {
     text: "test", attachments: [{ name: "../escape.txt", mimeType: "text/plain", data: "eA==" }],

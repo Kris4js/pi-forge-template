@@ -2,6 +2,8 @@ import { existsSync } from "node:fs";
 import { mkdir, open, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { SessionManager, type SessionEntry } from "@earendil-works/pi-coding-agent";
+import { IMAGE_ENTRY } from "../image-assets.ts";
+import type { ImageAsset } from "../protocol.ts";
 import { ArtifactStore } from "../artifacts/store.ts";
 import { RpcError } from "../ipc/peer.ts";
 import { ErrorCodes, type SessionDetail, type SessionInfo, type SessionSummary, type TranscriptMessage } from "../protocol.ts";
@@ -174,7 +176,12 @@ async function findSessionFile(paths: TenantPaths, sessionId: string): Promise<s
 /** Active branch (root -> leaf) rendered for display. Compactions appear as a summary marker. */
 function toTranscript(entries: SessionEntry[]): TranscriptMessage[] {
   const out: TranscriptMessage[] = [];
+  let pending: { text: string; promptText: string; images: ImageAsset[] } | undefined;
   for (const entry of entries) {
+    if (entry.type === "custom" && entry.customType === IMAGE_ENTRY) {
+      pending = entry.data as typeof pending;
+      continue;
+    }
     if (entry.type === "compaction") {
       out.push({ role: "summary", text: entry.summary });
       continue;
@@ -182,7 +189,10 @@ function toTranscript(entries: SessionEntry[]): TranscriptMessage[] {
     if (entry.type !== "message") continue;
     const message = entry.message as { role: string; [key: string]: any };
     if (message.role === "user") {
-      out.push({ role: "user", text: textOf(message.content), timestamp: message.timestamp });
+      const text = textOf(message.content);
+      const matching = pending?.promptText === text ? pending : undefined;
+      out.push({ role: "user", text: matching?.text ?? text, images: matching?.images, timestamp: message.timestamp });
+      pending = undefined;
     } else if (message.role === "assistant") {
       const blocks: any[] = Array.isArray(message.content) ? message.content : [];
       const toolCalls = blocks
@@ -208,6 +218,7 @@ function toTranscript(entries: SessionEntry[]): TranscriptMessage[] {
         toolName: message.toolName,
         text: textOf(message.content),
         isError: Boolean(message.isError),
+        images: !message.isError ? message.details?.images : undefined,
         artifactRevision: typeof revision === "number" && !message.isError ? revision : undefined,
       });
     }

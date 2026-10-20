@@ -56,4 +56,10 @@ const tools: AgentToolsFactory = (ctx) => [
 export default tools;
 ```
 
+## 生成图片结果
+
+生图工具获得图片字节后，调用 `await ctx.publishImages([{ name: "product.png", mimeType: "image/png", data: base64 }])`，并在成功的工具返回值中提供 `details: { images }`。`data` 是不带 data URL 前缀的 Base64；使用与上传相同的格式、大小和数量限制。不要把 Base64 放入文本回复。
+
+运行时会将图片保存为当前用户、当前会话的资产，实时推送并在工具结果中保留引用；前端复用上传图片的轮播、大图预览和下载。不包含实际生图供应商或 MCP 连接，工具仍需自行获取图片。不同生成版本应由工具分开返回，不混为一组。
+
 每个 run 都会以当前租户的 `ctx` 重新调用工厂函数，所以工具天然只作用于当前租户。有副作用的工具应在 `policy.tools` 里设为 `ask`。

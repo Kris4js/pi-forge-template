@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { Attachment, ImageAsset } from "../protocol.ts";
 import type { ArtifactStore } from "../artifacts/store.ts";
 import type { Tenant } from "../protocol.ts";
 
@@ -50,6 +51,8 @@ export type AgentToolContext = {
   sessionId: string;
   /** Versioned HTML artifacts of this session. Return `details: { artifact: { revision, bytes } }` from a tool that publishes. */
   artifacts: ArtifactStore;
+  /** Persist generated PNG/JPEG/WebP bytes; return details: { images } from the tool. */
+  publishImages: (images: Attachment[]) => Promise<ImageAsset[]>;
 };
 
 export type AgentToolsFactory = (ctx: AgentToolContext) => ToolDefinition<any, any, any>[];

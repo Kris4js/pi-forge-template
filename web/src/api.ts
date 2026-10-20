@@ -24,10 +24,11 @@ export type SessionSummary = {
   preview: string;
 };
 
+export type ImageAsset = { id: string; name: string; mimeType: string };
 export type TranscriptMessage =
-  | { role: "user"; text: string; timestamp?: number }
+  | { role: "user"; text: string; timestamp?: number; images?: ImageAsset[] }
   | { role: "assistant"; text: string; thinking?: string; toolCalls?: { id: string; name: string; args: unknown }[]; error?: string }
-  | { role: "tool"; toolCallId: string; toolName: string; text: string; isError: boolean; artifactRevision?: number }
+  | { role: "tool"; toolCallId: string; toolName: string; text: string; isError: boolean; artifactRevision?: number; images?: ImageAsset[] }
   | { role: "summary"; text: string };
 
 /** GET /v1/models: the models registered in the runtime's .env; key is "<provider>/<id>". */
@@ -42,6 +43,7 @@ export type Usage = { inputTokens: number; outputTokens: number; totalTokens: nu
 export type RunEvent =
   | { type: "run"; runId: string; sessionId: string; agentId: string }
   | { type: "run_started"; sessionId: string; model?: string }
+  | { type: "images"; images: ImageAsset[]; toolCallId?: string }
   | { type: "text_delta"; delta: string }
   | { type: "thinking_delta"; delta: string }
   | { type: "tool_start"; toolCallId: string; toolName: string; args: unknown }
@@ -94,6 +96,11 @@ export class Api {
   }
   session(sessionId: string) {
     return this.request<{ id: string; agentId?: string; messages: TranscriptMessage[] }>("GET", `/v1/sessions/${sessionId}`);
+  }
+  async image(sessionId: string, id: string, signal?: AbortSignal): Promise<Blob> {
+    const res = await fetch(`/v1/sessions/${encodeURIComponent(sessionId)}/images/${encodeURIComponent(id)}`, { headers: this.headers(), signal });
+    if (!res.ok) throw new ApiError(res.status, await errorMessage(res));
+    return res.blob();
   }
   artifacts(sessionId: string) {
     return this.request<ArtifactSummary[]>("GET", `/v1/sessions/${sessionId}/artifacts`);

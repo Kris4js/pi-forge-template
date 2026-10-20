@@ -8,6 +8,7 @@ import {
   type AgentSessionEvent,
 } from "@earendil-works/pi-coding-agent";
 import type { AgentCatalog, AgentManifest } from "./agents/manifest.ts";
+import { IMAGE_ENTRY } from "./image-assets.ts";
 import { saveAttachments, validateAttachments } from "./attachments.ts";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import { ArtifactStore } from "./artifacts/store.ts";
@@ -145,6 +146,11 @@ export class Runner {
         agentDir: agent.dir,
         userHome: paths.userHome,
         sessionId: sessionManager.getSessionId(),
+        publishImages: async (value) => {
+          const files = validateAttachments(value);
+          if (files.some((file) => !file.mimeType.startsWith("image/"))) throw new RpcError(ErrorCodes.invalidParams, "仅能发布图片");
+          return (await saveAttachments(paths.userHome, files, sessionManager.getSessionId())).assets;
+        },
         artifacts: ArtifactStore.forSession(paths, sessionManager.getSessionId()),
       });
       ({ session } = await createAgentSession({
@@ -164,8 +170,12 @@ export class Runner {
       if (attachments.some((file) => file.mimeType.startsWith("image/")) && !session.model?.input.includes("image")) {
         throw new RpcError(ErrorCodes.invalidParams, "当前模型不支持图片，请切换视觉模型");
       }
-      const saved = await saveAttachments(paths.userHome, attachments);
+      const saved = await saveAttachments(paths.userHome, attachments, session.sessionId);
       text += saved.text;
+      if (saved.assets.length) {
+        sessionManager.appendCustomEntry(IMAGE_ENTRY, { text: params.input.text, promptText: text, images: saved.assets });
+        emit({ type: "images", images: saved.assets });
+      }
       images = saved.images;
     } catch (error) {
       run.session?.dispose();
@@ -281,7 +291,7 @@ function mapEvent(event: AgentSessionEvent, usage: Usage): RunEvent[] {
     case "tool_execution_start":
       return [{ type: "tool_start", toolCallId: event.toolCallId, toolName: event.toolName, args: event.args }];
     case "tool_execution_end": {
-      const result = event.result as { content?: unknown; details?: { artifact?: { revision?: unknown; bytes?: unknown } } } | undefined;
+      const result = event.result as { content?: unknown; details?: { images?: import("./protocol.ts").ImageAsset[]; artifact?: { revision?: unknown; bytes?: unknown } } } | undefined;
       const out: RunEvent[] = [
         {
           type: "tool_end",
@@ -291,6 +301,7 @@ function mapEvent(event: AgentSessionEvent, usage: Usage): RunEvent[] {
           result: textOf(result?.content ?? event.result),
         },
       ];
+      if (!event.isError && result?.details?.images?.length) out.push({ type: "images", toolCallId: event.toolCallId, images: result.details.images });
       const artifact = result?.details?.artifact;
       if (!event.isError && typeof artifact?.revision === "number") {
         out.push({ type: "artifact", toolCallId: event.toolCallId, revision: artifact.revision, bytes: Number(artifact.bytes) || 0 });

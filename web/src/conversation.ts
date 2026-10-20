@@ -1,11 +1,11 @@
-import type { RunEvent, TranscriptMessage, Usage } from "./api";
+import type { ImageAsset, RunEvent, TranscriptMessage, Usage } from "./api";
 
 export type ToolStatus = "running" | "pending" | "success" | "error" | "denied";
 
 export type Approval = { state: "pending" | "approved" | "rejected"; reason?: string; by?: string; expiresAt?: string };
 
 export type Item =
-  | { kind: "user"; key: string; text: string; at?: number }
+  | { kind: "user"; key: string; text: string; at?: number; images?: ImageAsset[] }
   | {
       kind: "assistant";
       key: string;
@@ -28,6 +28,7 @@ export type Item =
       approval?: Approval;
       /** Artifact revision this call published. */
       artifactRevision?: number;
+      images?: ImageAsset[];
       startedAt?: number;
       durationMs?: number;
     }
@@ -41,7 +42,7 @@ const key = () => `i${++seq}`;
 export function fromTranscript(messages: TranscriptMessage[]): Item[] {
   const items: Item[] = [];
   for (const m of messages) {
-    if (m.role === "user") items.push({ kind: "user", key: key(), text: m.text, at: m.timestamp });
+    if (m.role === "user") items.push({ kind: "user", key: key(), text: m.text, at: m.timestamp, images: m.images });
     else if (m.role === "summary") items.push({ kind: "summary", key: key(), text: m.text });
     else if (m.role === "assistant") {
       if (m.text || m.thinking || m.error) {
@@ -52,7 +53,7 @@ export function fromTranscript(messages: TranscriptMessage[]): Item[] {
       }
     } else {
       const tool = items.find((i): i is Extract<Item, { kind: "tool" }> => i.kind === "tool" && i.id === m.toolCallId);
-      if (tool) Object.assign(tool, { result: m.text, status: m.isError ? "error" : "success", artifactRevision: m.artifactRevision });
+      if (tool) Object.assign(tool, { result: m.text, status: m.isError ? "error" : "success", artifactRevision: m.artifactRevision, images: m.images });
     }
   }
   return items;
@@ -72,6 +73,11 @@ export function applyEvent(items: Item[], e: RunEvent, ctx: { now: number; model
     a.thinkingStartedAt && a.thinkingMs === undefined ? { ...a, thinkingMs: ctx.now - a.thinkingStartedAt } : a;
 
   switch (e.type) {
+    case "images": {
+      if (e.toolCallId) return updateTool(e.toolCallId, () => ({ images: e.images }));
+      const user = [...next].reverse().find((item) => item.kind === "user");
+      return next.map((item) => item === user && item.kind === "user" ? { ...item, images: e.images } : item);
+    }
     case "text_delta":
     case "thinking_delta": {
       const current: Extract<Item, { kind: "assistant" }> =

@@ -1,3 +1,5 @@
+import { Api } from "../api";
+import { ImageGallery } from "./ImageGallery";
 import { motion } from "framer-motion";
 import { CircleAlert, CircleCheck, CircleSlash, Clock3, Coins, RotateCcw, Timer } from "lucide-react";
 import type { Item } from "../conversation";
@@ -6,6 +8,8 @@ import { Button, CopyButton, formatDuration, formatTokens } from "../ui";
 import { TurnTrace } from "./TurnTrace";
 
 type Props = {
+  api: Api;
+  sessionId?: string;
   items: Item[];
   agentName: string;
   busy: boolean;
@@ -38,7 +42,7 @@ function toTurns(items: Item[]): Turn[] {
   return turns;
 }
 
-export function MessageList({ items, agentName, busy, onDecide, onRetry }: Props) {
+export function MessageList({ api, sessionId, items, agentName, busy, onDecide, onRetry }: Props) {
   const turns = toTurns(items);
   return (
     <section className="messages" aria-label="消息列表">
@@ -46,13 +50,14 @@ export function MessageList({ items, agentName, busy, onDecide, onRetry }: Props
         const live = busy && index === turns.length - 1 && !turn.status;
         return (
           <article key={turn.key} className="turn">
-            {turn.user && <UserMessage item={turn.user} />}
+            {turn.user && <UserMessage item={turn.user} api={api} sessionId={sessionId} />}
             {(turn.body.length > 0 || live) && (
               <div className="assistant-turn">
                 <div className="assistant-label">
                   <ClaudeMark size={20} live={live} />
                   <strong>{agentName}</strong>
                 </div>
+                {sessionId && turn.body.filter((item) => item.kind === "tool" && item.images?.length).map((item) => item.kind === "tool" && <ImageGallery key={item.key} images={item.images!} api={api} sessionId={sessionId} />)}
                 <TurnTrace
                   body={turn.body}
                   live={live}
@@ -77,7 +82,7 @@ export function MessageList({ items, agentName, busy, onDecide, onRetry }: Props
   );
 }
 
-function UserMessage({ item }: { item: User }) {
+function UserMessage({ item, api, sessionId }: { item: User; api: Api; sessionId?: string }) {
   return (
     <motion.div
       className="user-row"
@@ -85,7 +90,7 @@ function UserMessage({ item }: { item: User }) {
       animate={{ opacity: 1, y: 0, scale: 1 }}
       transition={{ type: "spring", stiffness: 520, damping: 38 }}
     >
-      <div className="user-bubble">{item.text}</div>
+      <div className="user-bubble">{item.images?.length && sessionId ? <ImageGallery images={item.images} api={api} sessionId={sessionId} /> : null}{item.text && <div>{item.text}</div>}</div>
       <div className="user-actions">
         <CopyButton text={item.text} compact />
       </div>

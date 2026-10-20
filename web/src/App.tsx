@@ -231,7 +231,7 @@ export function App() {
   async function send(text: string, files: File[] = []) {
     if (!agentId || (!text.trim() && !files.length) || busy) return;
     const attachments = await encodeAttachments(files);
-    const displayText = [text, ...files.map((file) => `📎 ${file.name}`)].filter(Boolean).join("\n");
+    const displayText = [text, ...files.filter((file) => !/\.(png|jpe?g|webp)$/i.test(file.name)).map((file) => `📎 ${file.name}`)].filter(Boolean).join("\n");
     setNotice(undefined);
     setItems((prev) => [...prev, userItem(displayText)]);
     requestAnimationFrame(() => scroll.scrollToBottom(true));
@@ -486,6 +486,8 @@ export function App() {
               ) : (
                 <PreviewLink.Provider value={openPreviewAt}>
                   <MessageList
+                    api={api}
+                    sessionId={sessionId}
                     items={items}
                     agentName={agent?.name ?? "agent"}
                     busy={busy}
