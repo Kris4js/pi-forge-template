@@ -17,6 +17,7 @@ export const Methods = {
   sessionDelete: "session.delete",
   sessionUpdate: "session.update",
   artifactList: "artifact.list",
+  imageModelsList: "images.models",
   imageGet: "image.get",
   artifactGet: "artifact.get",
   // runtime -> gateway
@@ -43,6 +44,7 @@ export type RunStartParams = SessionScope & {
   sessionId?: string;
   input: { text: string; attachments?: Attachment[] };
   /** A key from models.list; omit for the agent's / env default. */
+  imageModel?: string;
   model?: string;
   /** off | minimal | low | medium | high | xhigh; pi clamps it to the model. */
   thinkingLevel?: string;

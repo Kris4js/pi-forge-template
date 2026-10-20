@@ -14,6 +14,12 @@ export async function startFakeOpenAI(options: { chunkDelayMs?: number; onReques
   const pause = () => (options.chunkDelayMs ? new Promise((r) => setTimeout(r, options.chunkDelayMs)) : undefined);
   let calls = 0;
   const server: Server = createServer((req, res) => {
+    if (req.method === "POST" && req.url === "/v1/images") {
+      let raw = "";
+      req.on("data", (chunk) => { raw += chunk; });
+      req.on("end", () => { const body = JSON.parse(raw); res.setHeader("Content-Type", "application/json"); res.end(JSON.stringify({ data: Array.from({ length: body.n ?? 1 }, () => ({ b64_json: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a1S0AAAAASUVORK5CYII=", media_type: "image/png" })) })); });
+      return;
+    }
     if (req.method !== "POST" || !req.url?.endsWith("/chat/completions")) {
       res.writeHead(404).end();
       return;
@@ -62,6 +68,10 @@ export async function startFakeOpenAI(options: { chunkDelayMs?: number; onReques
 }
 
 function respond(messages: ChatMessage[]): { text?: string; tool?: { name: string; args: unknown } } {
+  const budgetStart = messages.findLastIndex((m) => m.role === "user" && text(m.content).includes("!image-budget"));
+  if (budgetStart >= 0 && messages.slice(budgetStart).filter((m) => m.role === "tool").length < 4) {
+    return { tool: { name: "generate_images", args: { images: [{ prompt: "budget test", count: 10 }] } } };
+  }
   const last = messages.at(-1);
   if (last?.role === "tool") {
     const results = messages

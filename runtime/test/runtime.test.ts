@@ -44,6 +44,9 @@ before(async () => {
       PI_MODEL_BASE_URL: model.baseUrl,
       PI_MODEL_ID: "fake-model",
       PI_MODEL_IDS: "vendor/fast-model, fake-model",
+      PI_IMAGE_URL: `${model.baseUrl}/images`,
+      PI_IMAGE_API_KEY: "fake-image-key",
+      PI_IMAGE_MODEL_ID: "test/image",
       PI_MODEL_API_KEY: "test-key",
       FORGE_DATA_DIR: dataDir,
       FORGE_AGENTS_DIR: join(root, "agents"),
@@ -344,4 +347,28 @@ test("attachments cross IPC into the model and remain isolated from other users"
   await assert.rejects(peer.request("run.start", { runId: "invalid-attachment", tenant, agentId: "assistant", input: {
     text: "test", attachments: [{ name: "../escape.txt", mimeType: "text/plain", data: "eA==" }],
   } }), /附件名称无效/);
+});
+
+
+test("image-designer generates, publishes and edits session-scoped references through governed tools", async () => {
+ const first = await run("generate-image", "image-designer", '!generate_images {"images":[{"prompt":"white ceramic cup"}]}');
+ const image = first.events.find((event) => event.type === "images");
+ assert.ok(image && image.type === "images" && image.toolCallId);
+ const asset = image.images[0]!;
+ assert.ok(authorizeCalls.some((call) => call.runId === "generate-image" && call.toolName === "generate_images"));
+ const detail = await peer.request<SessionDetail>("session.get", { tenant, sessionId: first.sessionId });
+ assert.ok(detail.messages.some((message) => message.role === "tool" && message.images?.[0]?.id === asset.id));
+ const edited = await run("edit-image", "image-designer", `!generate_images ${JSON.stringify({ images: [{ prompt: "change background to blue", referenceIds: [asset.id] }] })}`, first.sessionId);
+ assert.ok(edited.events.some((event) => event.type === "images"));
+ const other = await run("foreign-reference", "image-designer", `!generate_images ${JSON.stringify({ images: [{ prompt: "edit", referenceIds: [asset.id] }] })}`);
+ assert.ok(other.events.some((event) => event.type === "tool_end" && event.isError));
+ assert.ok(!other.events.some((event) => event.type === "images"));
+});
+
+
+test("image generation permits 30 images per run and blocks the next batch", async () => {
+ const result = await run("image-budget", "image-designer", "!image-budget");
+ const images = result.events.filter((event) => event.type === "images");
+ assert.equal(images.reduce((sum, event) => sum + (event.type === "images" ? event.images.length : 0), 0), 30);
+ assert.equal(result.events.filter((event) => event.type === "tool_end" && event.isError).length, 1);
 });

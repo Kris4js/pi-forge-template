@@ -51,3 +51,10 @@
 Magpie 是本机 macOS 应用依赖，不能把 `/Applications/...` 命令直接搬入 Linux 部署。线上需改为图片 API 后端或明确部署独立图片服务。
 
 仓库依据：runtime/src/agents/manifest.ts、runtime/src/run.ts、runtime/src/attachments.ts、runtime/src/image-assets.ts、gateway/internal/config/config.go、agents/README.md。
+
+
+## 后续决策
+
+用户授权单图测试后，generate_image 实际返回 isError:true，文本为 `no image: magpie knows no model "codex/gpt-image-2" to draw with`，未返回图片。用户随后明确放弃 Magpie，改为环境变量配置 OpenRouter 图片模型；没有保留 MCP SDK 依赖或实现 Magpie 适配。
+
+OpenRouter 当前官方文档确认专用接口 POST https://openrouter.ai/api/v1/images，参考图字段 input_references，响应 data[].b64_json / media_type。来源：https://openrouter.ai/docs/guides/overview/multimodal/image-generation ；公开模型发现接口 https://openrouter.ai/api/v1/images/models 已成功只读访问。实现为 runtime/src/model/images.ts，具体配置见 README。

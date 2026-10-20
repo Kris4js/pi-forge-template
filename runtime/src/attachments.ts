@@ -8,13 +8,13 @@ import { RpcError } from "./ipc/peer.ts";
 import { ErrorCodes, type Attachment } from "./protocol.ts";
 
 const MAX_FILE = 4 * 1024 * 1024;
-const MAX_TOTAL = 8 * 1024 * 1024;
+const MAX_TOTAL = 80 * 1024 * 1024;
 const TEXT_EXT = /\.(txt|md|csv|json|ya?ml|log)$/i;
 
 /** Validate all bytes before creating files; clients cannot supply a filesystem path. */
-export function validateAttachments(value: unknown): Attachment[] {
+export function validateAttachments(value: unknown, maxCount = 20): Attachment[] {
   if (value === undefined) return [];
-  if (!Array.isArray(value) || value.length > 4) throw invalid("最多添加 4 个附件");
+  if (!Array.isArray(value) || value.length > maxCount) throw invalid(`最多添加 ${maxCount} 个附件`);
   let total = 0;
   return value.map((item) => {
     if (!item || typeof item.name !== "string" || !item.name.trim() || item.name.length > 160 || /[\x00-\x1f/\\]/.test(item.name)) throw invalid("附件名称无效");
@@ -22,7 +22,7 @@ export function validateAttachments(value: unknown): Attachment[] {
     const bytes = Buffer.from(item.data, "base64");
     if (bytes.toString("base64") !== item.data) throw invalid("附件编码无效");
     total += bytes.length;
-    if (!bytes.length || bytes.length > MAX_FILE || total > MAX_TOTAL) throw invalid("单个附件最大 4 MB，合计最大 8 MB");
+    if (!bytes.length || bytes.length > MAX_FILE || total > MAX_TOTAL) throw invalid("单个附件最大 4 MB，合计最大 80 MB");
     if (item.mimeType === "image/png") {
       if (!bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) throw invalid("PNG 图片内容无效");
     } else if (item.mimeType === "image/jpeg") {

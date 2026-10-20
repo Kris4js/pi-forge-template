@@ -14,6 +14,7 @@ const png = { name: "product.png", mimeType: "image/png", data: "iVBORw0KGgoAAAA
 test("attachment validation rejects traversal, disguised files, invalid base64 and size/count overflow", () => {
   assert.equal(validateAttachments(undefined).length, 0);
   assert.equal(validateAttachments([text, png]).length, 2);
+  assert.equal(validateAttachments(Array(20).fill(png)).length, 20);
   for (const files of [
     [{ ...text, name: "../escape.txt" }],
     [{ ...png, data: text.data }],
@@ -21,7 +22,7 @@ test("attachment validation rejects traversal, disguised files, invalid base64 a
     [{ ...text, name: "page.html" }],
     [{ ...text, data: Buffer.from([255]).toString("base64") }],
     [{ ...text, data: Buffer.alloc(100_001, 65).toString("base64") }],
-    Array(5).fill(text),
+    Array(21).fill(text),
     [{ ...png, data: "A".repeat(6 * 1024 * 1024) }],
   ]) assert.throws(() => validateAttachments(files));
 });

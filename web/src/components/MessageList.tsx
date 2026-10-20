@@ -1,6 +1,7 @@
 import { Api } from "../api";
 import { ImageGallery } from "./ImageGallery";
 import { motion } from "framer-motion";
+import { useMemo } from "react";
 import { CircleAlert, CircleCheck, CircleSlash, Clock3, Coins, RotateCcw, Timer } from "lucide-react";
 import type { Item } from "../conversation";
 import { ClaudeMark } from "../lib/icons";
@@ -57,7 +58,6 @@ export function MessageList({ api, sessionId, items, agentName, busy, onDecide, 
                   <ClaudeMark size={20} live={live} />
                   <strong>{agentName}</strong>
                 </div>
-                {sessionId && turn.body.filter((item) => item.kind === "tool" && item.images?.length).map((item) => item.kind === "tool" && <ImageGallery key={item.key} images={item.images!} api={api} sessionId={sessionId} />)}
                 <TurnTrace
                   body={turn.body}
                   live={live}
@@ -66,6 +66,7 @@ export function MessageList({ api, sessionId, items, agentName, busy, onDecide, 
                   finalStatus={turn.status?.status}
                   onDecide={live ? onDecide : undefined}
                 />
+                {sessionId && <TurnImages body={turn.body} api={api} sessionId={sessionId} />}
               </div>
             )}
             {!live && turn.body.length > 0 && (
@@ -80,6 +81,15 @@ export function MessageList({ api, sessionId, items, agentName, busy, onDecide, 
       })}
     </section>
   );
+}
+
+/** Every image the turn's tools produced, as one carousel below the reply. */
+function TurnImages({ body, api, sessionId }: { body: Item[]; api: Api; sessionId: string }) {
+  const all = body.flatMap((item) => item.kind === "tool" ? item.images ?? [] : []);
+  const ids = all.map((image) => image.id).join("|");
+  // Stable identity until an image is added, so the gallery doesn't redo work on every streamed token.
+  const images = useMemo(() => all, [ids]); // eslint-disable-line react-hooks/exhaustive-deps
+  return images.length ? <ImageGallery images={images} api={api} sessionId={sessionId} /> : null;
 }
 
 function UserMessage({ item, api, sessionId }: { item: User; api: Api; sessionId?: string }) {

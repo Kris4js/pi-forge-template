@@ -49,6 +49,7 @@ func (s *Server) Handler() http.Handler {
 	})
 	mux.Handle("GET /v1/me", s.authed(s.me))
 	mux.Handle("GET /v1/agents", s.authed(s.listAgents))
+	mux.Handle("GET /v1/image-models", s.authed(s.listImageModels))
 	mux.Handle("GET /v1/models", s.authed(s.listModels))
 	mux.Handle("GET /v1/sessions", s.authed(s.listSessions))
 	mux.Handle("GET /v1/sessions/{session}", s.authed(s.getSession))
@@ -73,7 +74,7 @@ func (s *Server) authed(h handler) http.Handler {
 		if err == nil {
 			limit := int64(maxBodyBytes)
 			if r.Method == http.MethodPost && r.URL.Path == "/v1/runs" {
-				limit = 12 << 20
+				limit = 112 << 20
 			}
 			r.Body = http.MaxBytesReader(w, r.Body, limit)
 			err = h(w, r, p)
@@ -299,6 +300,7 @@ type startRunBody struct {
 	Attachments []ipc.Attachment `json:"attachments,omitempty"`
 	// Model is a key from GET /v1/models; ThinkingLevel one of its thinkingLevels.
 	Model         string `json:"model,omitempty"`
+	ImageModel    string `json:"imageModel,omitempty"`
 	ThinkingLevel string `json:"thinkingLevel,omitempty"`
 	// Stream defaults to true (SSE). false waits for the run and returns JSON.
 	Stream *bool `json:"stream,omitempty"`
@@ -308,6 +310,15 @@ type startRunBody struct {
 func (s *Server) listModels(w http.ResponseWriter, r *http.Request, p auth.Principal) error {
 	var out json.RawMessage
 	if err := s.Runtime.Call(r.Context(), ipc.MethodModelsList, struct{}{}, &out); err != nil {
+		return err
+	}
+	writeRaw(w, http.StatusOK, out)
+	return nil
+}
+
+func (s *Server) listImageModels(w http.ResponseWriter, r *http.Request, p auth.Principal) error {
+	var out json.RawMessage
+	if err := s.Runtime.Call(r.Context(), "images.models", struct{}{}, &out); err != nil {
 		return err
 	}
 	writeRaw(w, http.StatusOK, out)
@@ -325,7 +336,7 @@ func (s *Server) startRun(w http.ResponseWriter, r *http.Request, p auth.Princip
 		}
 		return apiError{http.StatusBadRequest, "invalid_json", err.Error()}
 	}
-	if (strings.TrimSpace(body.Text) == "" && len(body.Attachments) == 0) || len(body.Text) > maxInputLen || len(body.Attachments) > 4 {
+	if (strings.TrimSpace(body.Text) == "" && len(body.Attachments) == 0) || len(body.Text) > maxInputLen || len(body.Attachments) > 20 {
 		return apiError{http.StatusBadRequest, "invalid_input", "text must be 1..100000 characters"}
 	}
 	m, err := s.agent(r, p, body.AgentID)
@@ -333,7 +344,7 @@ func (s *Server) startRun(w http.ResponseWriter, r *http.Request, p auth.Princip
 		return err
 	}
 	run, err := s.Runs.Start(r.Context(), runs.StartRequest{
-		Principal: p, Agent: m, SessionID: body.SessionID, Text: body.Text, Attachments: body.Attachments, Model: body.Model, ThinkingLevel: body.ThinkingLevel,
+		Principal: p, Agent: m, SessionID: body.SessionID, Text: body.Text, Attachments: body.Attachments, Model: body.Model, ImageModel: body.ImageModel, ThinkingLevel: body.ThinkingLevel,
 	})
 	if err != nil {
 		return err

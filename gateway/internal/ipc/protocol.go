@@ -57,6 +57,7 @@ type RunStartParams struct {
 	Input     RunInput `json:"input"`
 	// Model is a key from models.list; the runtime refuses models that are not registered.
 	Model         string `json:"model,omitempty"`
+	ImageModel    string `json:"imageModel,omitempty"`
 	ThinkingLevel string `json:"thinkingLevel,omitempty"`
 }
 

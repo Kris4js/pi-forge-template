@@ -82,7 +82,7 @@ curl -N -X POST localhost:8090/v1/runs -H 'X-Workspace: acme' -H 'X-User-Id: ali
   -d '{"agentId":"assistant","text":"你好"}'
 ```
 
-附件通过输入框「＋ → 上传照片和文件」选择，随 `/v1/runs` 请求的 `attachments: [{name,mimeType,data}]`（原始 Base64，不含 data URL 前缀）一起发送。支持 PNG/JPEG/WebP 与 UTF-8 的 txt/md/csv/json/yaml/yml/log；最多 4 个，图片单个 4 MB、文本单个 100 KB、总计 8 MB。仅此路由允许 12 MiB 请求体，其他路由仍为 1 MiB。文件落入当前用户的 `attachments/<随机ID>/`；图片作为视觉输入、文本作为附件上下文交给模型。无文字时也可发送；不支持视觉的模型会拒绝图片。首版不支持 PDF/Office 及附件自动清理，删除会话不会删除用户附件。图片消息支持单图展示、多图横向轮播及大图预览（方向键切换、Escape 关闭、下载）；本次起发送的图片引用会随会话持久化，刷新后可恢复。图片通过鉴权的 `GET /v1/sessions/{session}/images/{image}` 读取，不使用公开文件 URL；升级前已发送的图片不自动补建历史引用。
+附件通过输入框「＋ → 上传照片和文件」选择，随 `/v1/runs` 请求的 `attachments: [{name,mimeType,data}]`（原始 Base64，不含 data URL 前缀）一起发送。支持 PNG/JPEG/WebP 与 UTF-8 的 txt/md/csv/json/yaml/yml/log；最多 20 个，图片单个 4 MB、文本单个 100 KB、总计 80 MB。仅此路由允许 112 MiB 请求体，其他路由仍为 1 MiB。文件落入当前用户的 `attachments/<随机ID>/`；图片作为视觉输入、文本作为附件上下文交给模型。无文字时也可发送；不支持视觉的模型会拒绝图片。首版不支持 PDF/Office 及附件自动清理，删除会话不会删除用户附件。图片消息支持单图展示、多图横向轮播及大图预览（方向键切换、Escape 关闭、下载）；本次起发送的图片引用会随会话持久化，刷新后可恢复。图片通过鉴权的 `GET /v1/sessions/{session}/images/{image}` 读取，不使用公开文件 URL；升级前已发送的图片不自动补建历史引用。
 
 SSE 事件依次为：`run`（runId / sessionId）→ `run_started` → `text_delta` / `thinking_delta` / `tool_start` / `approval_required` / `approval_resolved` / `tool_end` / `message_end` / `compaction` / `artifact_draft` / `artifact` → `run_finished`（`completed | failed | cancelled | timeout`）。
 
@@ -93,3 +93,29 @@ make test     # go test -race + runtime 端到端测试（真实拉起 runtime �
 make check    # go vet + tsc
 make build    # bin/gateway + web/dist；FORGE_WEB_DIR=web/dist 时由 gateway 直接托管前端
 ```
+
+
+## 图片生成与编辑（OpenRouter）
+
+在 `.env` 中单独配置图片接口，密钥不发送到浏览器：
+
+```dotenv
+PI_IMAGE_URL=https://openrouter.ai/api/v1/images
+PI_IMAGE_API_KEY=你的OpenRouter密钥
+PI_IMAGE_MODEL_ID=你的图片模型ID
+PI_IMAGE_MODEL_IDS=另一个图片模型ID,第三个图片模型ID
+```
+
+重启服务，选择「电商详情页」，在输入框左下方选择已注册图片模型。右侧原有模型仍是负责理解需求、调用工具的聊天模型。输入生成要求，或上传参考图并描述编辑目标；`generate_images` 默认需要审批，批准后才发起付费请求。生成结果复用轮播、预览、下载及会话历史。仅列出环境变量允许的模型，不会把平台所有模型自动开放。
+
+接口使用 OpenRouter 专用 `POST /api/v1/images`，编辑通过 `input_references` 的 data URL 提供本会话资产；不是 `/images/generations` 或 `/images/edits`。可用模型及能力见 https://openrouter.ai/api/v1/images/models ，协议见 https://openrouter.ai/docs/guides/overview/multimodal/image-generation 。模型需支持所选比例、图片数量和参考图；兼容性错误如实返回，不自动降级或重试。
+
+### 电商详情页工作流
+
+参考 [1click-ecom-detailpage](https://github.com/coolqoo/1click-ecom-detailpage) 的购买驱动诊断、购买理由卡、视觉风格锁和逐屏提示词流程，按本服务的工具能力重新编写提示词，未直接安装其脚本或复制完整 Skill。默认中文、5 张详情图规划，先生成首屏确认风格，再逐屏生成；面向海外市场时按目标语言本地化。缺少真实评价或对比证据时改用产品细节或 FAQ，不沿用参考项目的模拟评价/数据默认行为。
+
+界面显示名为「电商详情页」，内部 ID 保留 `image-designer`，兼容已有会话和图片模型选择。交付为详情分屏图片，不是 HTML 网页。修改定义后重启服务；旧会话沿用历史上下文，新会话更适合使用新流程。
+
+首版非流式，图片请求最多等待 240 秒，电商详情页每轮总超时为 3 小时（含审批等待）。每轮累计最多请求 30 张、单次最多 10 张，更多分批；失败的已发出请求同样占用预算。上传和参考图最多 20 张，单张 4 MiB、附件合计 80 MiB，超限明确失败，不自动压缩；已完成生成仍可能产生费用。停止通过 AbortSignal 断开请求，不保证供应商停止计算。图片费用尚未合并进聊天 token 用量显示。不会自动重试生成，但 Agent 是否再次调用仍由模型决定，重复审批时应检查参数。
+
+尚未配置真实 OpenRouter 密钥进行生图验收，自动测试使用兼容服务测试桩。此前 Magpie 实测报错找不到配置的图片模型，现不再依赖 Magpie 或 MCP。

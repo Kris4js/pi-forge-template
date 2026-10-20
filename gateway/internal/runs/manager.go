@@ -68,6 +68,7 @@ type StartRequest struct {
 	Attachments []ipc.Attachment
 	// Optional model choice (models.list key) and thinking level; validated by the runtime.
 	Model         string
+	ImageModel    string
 	ThinkingLevel string
 }
 
@@ -90,6 +91,7 @@ func (m *Manager) Start(ctx context.Context, req StartRequest) (*Run, error) {
 		SessionID:     req.SessionID,
 		Input:         ipc.RunInput{Text: req.Text, Attachments: req.Attachments},
 		Model:         req.Model,
+		ImageModel:    req.ImageModel,
 		ThinkingLevel: req.ThinkingLevel,
 	}, &result)
 	if err != nil {

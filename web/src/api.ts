@@ -24,6 +24,7 @@ export type SessionSummary = {
   preview: string;
 };
 
+export type ImageModels = { models: string[]; defaultModel: string; configured: boolean };
 export type ImageAsset = { id: string; name: string; mimeType: string };
 export type TranscriptMessage =
   | { role: "user"; text: string; timestamp?: number; images?: ImageAsset[] }
@@ -85,6 +86,9 @@ export class Api {
   me() {
     return this.request<{ principal: { tenant: { workspace: string; userId: string } }; runtime: { model?: string } }>("GET", "/v1/me");
   }
+  imageModels() {
+    return this.request<ImageModels>("GET", "/v1/image-models");
+  }
   models() {
     return this.request<ModelsResult>("GET", "/v1/models");
   }
@@ -123,7 +127,7 @@ export class Api {
 
   /** Starts a run and feeds SSE events to onEvent until the stream ends. */
   async run(
-    body: { agentId: string; sessionId?: string; text: string; attachments?: Array<{ name: string; mimeType: string; data: string }>; model?: string; thinkingLevel?: string },
+    body: { agentId: string; sessionId?: string; text: string; attachments?: Array<{ name: string; mimeType: string; data: string }>; model?: string; imageModel?: string; thinkingLevel?: string },
     onEvent: (e: RunEvent) => void,
     signal?: AbortSignal,
   ) {

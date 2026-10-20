@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { imageConfig } from "./model/images.ts";
 import { getImageAsset } from "./image-assets.ts";
 import { AgentCatalog } from "./agents/manifest.ts";
 import { ArtifactStore } from "./artifacts/store.ts";
@@ -64,6 +65,10 @@ peer.handle(Methods.imageGet, async (params: SessionGetParams & { id: string }) 
   const sessionId = requireSessionId(params);
   await getSessionInfo(paths, sessionId);
   return getImageAsset(paths.userHome, sessionId, params.id);
+});
+peer.handle(Methods.imageModelsList, () => {
+  const { models, defaultModel, key } = imageConfig();
+  return { models, defaultModel, configured: Boolean(key && models.length) };
 });
 peer.handle(Methods.modelsList, () => models.list());
 peer.handle(Methods.runStart, (params: RunStartParams) => runner.start(params));
