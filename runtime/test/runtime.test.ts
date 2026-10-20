@@ -42,6 +42,7 @@ before(async () => {
       PI_MODEL_PROTOCOL: "openai-completions",
       PI_MODEL_BASE_URL: model.baseUrl,
       PI_MODEL_ID: "fake-model",
+      PI_MODEL_IDS: "vendor/fast-model, fake-model",
       PI_MODEL_API_KEY: "test-key",
       FORGE_DATA_DIR: dataDir,
       FORGE_AGENTS_DIR: join(root, "agents"),
@@ -270,4 +271,44 @@ test("sessions can be renamed (pi session_info) and pinned (user preference), bu
   assert.ok(list.every((s) => !s.pinned));
   const pins = JSON.parse(await readFile(join(dataDir, "workspaces/acme/users/u1/pins.json"), "utf8"));
   assert.deepEqual(pins.pinned, []);
+});
+
+test("the console can pick any registered model and thinking level, and nothing else", async () => {
+  const list = await peer.request<{
+    models: Array<{ key: string; label: string; group: string; name: string }>;
+    defaultModel: string;
+    thinkingLevels: string[];
+    defaultThinkingLevel: string;
+  }>("models.list", {});
+  assert.deepEqual(
+    list.models.map((m) => [m.key, m.label, m.group, m.name]),
+    [
+      ["custom/fake-model", "fake-model", "Custom", "fake-model"],
+      ["custom/vendor/fast-model", "vendor/fast-model", "vendor", "fast-model"],
+    ],
+  );
+  assert.equal(list.defaultModel, "custom/fake-model");
+  assert.deepEqual(list.thinkingLevels, ["off", "low", "medium", "high"]);
+
+  const done = new Promise<void>((r) => finished.set("m1", r));
+  await peer.request("run.start", {
+    runId: "m1",
+    tenant,
+    agentId: "assistant",
+    input: { text: "hi" },
+    model: "custom/vendor/fast-model",
+    thinkingLevel: "high",
+  });
+  await done;
+  const started = events.get("m1")!.find((e) => e.type === "run_started");
+  assert.ok(started && started.type === "run_started" && started.model === "vendor/fast-model");
+
+  await assert.rejects(
+    peer.request("run.start", { runId: "m2", tenant, agentId: "assistant", input: { text: "x" }, model: "openai/gpt-x" }),
+    /model not available/,
+  );
+  await assert.rejects(
+    peer.request("run.start", { runId: "m3", tenant, agentId: "assistant", input: { text: "x" }, thinkingLevel: "max" }),
+    /invalid thinkingLevel/,
+  );
 });

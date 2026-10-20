@@ -104,32 +104,6 @@
   white-space: nowrap;
 }
 
-/* Running steps shimmer; the title still says what is happening for reduced motion / AT. */
-.trace-line[data-status="running"] > .trace-title {
-  background: linear-gradient(
-    90deg,
-    var(--cds-text-secondary) 0%,
-    var(--cds-text-secondary) 40%,
-    var(--cds-text-primary) 50%,
-    var(--cds-text-secondary) 60%,
-    var(--cds-text-secondary) 100%
-  );
-  background-size: 250% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  animation: trace-shimmer 2.2s linear infinite;
-}
-
-@keyframes trace-shimmer {
-  from {
-    background-position: 100% 0;
-  }
-  to {
-    background-position: -150% 0;
-  }
-}
-
 .trace-description {
   flex-shrink: 0;
   color: var(--cds-text-muted);
@@ -558,13 +532,6 @@
   color: inherit;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .trace-line[data-status="running"] > .trace-title {
-    animation: none;
-    background: none;
-    color: inherit;
-  }
-}
 
 /* ---------- Select (shadcn nova on Base UI) ---------- */
 
@@ -765,4 +732,368 @@
 .select-trigger-icon svg {
   width: 16px;
   height: 16px;
+}
+
+/* ---------- Card + Skeleton (shadcn nova) ---------- */
+
+.card {
+  --card-spacing: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--card-spacing);
+  padding: var(--card-spacing) 0;
+  overflow: hidden;
+  border-radius: 12px;
+  font-size: 14px;
+  color: var(--cds-text-primary);
+  background: var(--cds-surface-3);
+  box-shadow: 0 0 0 1px var(--cds-border);
+}
+
+.card[data-size="sm"] {
+  --card-spacing: 12px;
+}
+
+.card:has(> .card-footer) {
+  padding-bottom: 0;
+}
+
+.card-header {
+  display: grid;
+  gap: 4px;
+  padding: 0 var(--card-spacing);
+}
+
+.card-header:has(> .card-action) {
+  grid-template-columns: 1fr auto;
+}
+
+.card-title {
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.card[data-size="sm"] .card-title {
+  font-size: 14px;
+}
+
+.card-description {
+  font-size: 14px;
+  color: var(--cds-text-muted);
+}
+
+.card-action {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: start;
+  justify-self: end;
+}
+
+.card-content {
+  padding: 0 var(--card-spacing);
+}
+
+.card-footer {
+  display: flex;
+  align-items: center;
+  padding: var(--card-spacing);
+  border-top: 1px solid var(--cds-border-subtle);
+  background: var(--cds-fill-ghost-hover);
+}
+
+.skeleton-block {
+  border-radius: 6px;
+  background: var(--cds-fill-ghost-selected);
+  animation: skeleton-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes skeleton-pulse {
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* Preview loading: the skeleton card sits centered over the stage. */
+.preview-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--cds-surface-0);
+}
+
+.preview-loading .card {
+  width: 100%;
+  max-width: 20rem;
+}
+
+.preview-loading .card-header {
+  gap: 8px;
+}
+
+.skeleton-line {
+  height: 16px;
+}
+
+.skeleton-media {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-block {
+    animation: none;
+  }
+}
+
+/* ---------- shimmer (shadcn utility, plain CSS) ----------
+ * The highlight is derived from currentColor, so it works on any text color and brightens in dark mode.
+ * From shadcn's packages/shadcn/src/tailwind.css (MIT). */
+
+@property --shimmer-angle {
+  syntax: "<angle>";
+  inherits: true;
+  initial-value: 20deg;
+}
+
+@keyframes tw-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+
+.shimmer,
+.trace-line[data-status="running"] > .trace-title {
+  --_spread: var(--shimmer-spread, calc(3ch + 40px));
+  --_base: currentColor;
+  --_highlight: var(--shimmer-color, oklch(from currentColor l c h / calc(alpha * 0.2)));
+  background-image: linear-gradient(
+    calc(90deg + var(--shimmer-angle)),
+    var(--_base) calc(50% - var(--_spread)),
+    color-mix(in oklch, var(--_highlight), var(--_base) 50%) calc(50% - var(--_spread) * 0.5),
+    var(--_highlight) 50%,
+    color-mix(in oklch, var(--_highlight), var(--_base) 50%) calc(50% + var(--_spread) * 0.5),
+    var(--_base) calc(50% + var(--_spread))
+  );
+  background-repeat: no-repeat;
+  background-size: calc(200% + var(--_spread) * 2) 100%;
+  background-position: 0 0;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: tw-shimmer var(--shimmer-duration, 2s) linear infinite;
+}
+
+:root.dark :is(.shimmer, .trace-line[data-status="running"] > .trace-title) {
+  --_highlight: var(--shimmer-color, oklch(from currentColor max(0.8, calc(l + 0.4)) c h / calc(alpha + 0.4)));
+}
+
+[dir="rtl"] .shimmer {
+  animation-direction: reverse;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shimmer,
+  .trace-line[data-status="running"] > .trace-title {
+    animation: none;
+    background-image: none;
+    -webkit-text-fill-color: currentColor;
+  }
+}
+
+.turn-waiting {
+  margin: 2px 0 0;
+  font-size: 14px;
+  color: var(--cds-text-muted);
+}
+
+/* ---------- DropdownMenu (shadcn nova on Base UI) ---------- */
+
+.dropdown-menu-positioner {
+  z-index: 60;
+  isolation: isolate;
+  outline: none;
+}
+
+.dropdown-menu-content {
+  min-width: 128px;
+  max-height: var(--available-height);
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 4px;
+  border-radius: 10px;
+  font-size: 13px;
+  color: var(--cds-text-primary);
+  background: var(--cds-surface-popover);
+  box-shadow: var(--cds-shadow-popover);
+  transform-origin: var(--transform-origin);
+  transition:
+    opacity 100ms,
+    transform 100ms;
+  outline: none;
+}
+
+.dropdown-menu-content[data-starting-style],
+.dropdown-menu-content[data-ending-style] {
+  opacity: 0;
+  transform: scale(0.95);
+}
+
+.dropdown-menu-content[data-instant] {
+  transition: none;
+}
+
+.dropdown-menu-label {
+  padding: 4px 6px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--cds-text-muted);
+}
+
+.dropdown-menu-label[data-inset] {
+  padding-left: 28px;
+}
+
+.dropdown-menu-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+  border-radius: 6px;
+  cursor: default;
+  outline: none;
+  user-select: none;
+}
+
+.dropdown-menu-item.radio {
+  padding-right: 32px;
+}
+
+.dropdown-menu-item[data-inset] {
+  padding-left: 28px;
+}
+
+.dropdown-menu-item[data-highlighted] {
+  background: var(--cds-fill-ghost-hover);
+}
+
+.dropdown-menu-item[data-disabled] {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.dropdown-menu-item[data-variant="destructive"] {
+  color: var(--danger);
+}
+
+.dropdown-menu-item svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+.dropdown-menu-item-indicator {
+  position: absolute;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--app-action);
+  pointer-events: none;
+}
+
+.dropdown-menu-separator {
+  height: 1px;
+  margin: 4px -4px;
+  background: var(--cds-border-subtle);
+}
+
+.dropdown-menu-shortcut {
+  margin-left: auto;
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  color: var(--cds-text-muted);
+}
+
+/* ---------- Model selector (composer) ---------- */
+
+.model-selector {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.selector-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px 0 10px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  color: var(--cds-text-primary);
+  box-shadow: inset 0 0 0 1px var(--cds-border);
+  transition:
+    background-color 120ms,
+    box-shadow 120ms;
+}
+
+.selector-trigger:hover,
+.selector-trigger[data-popup-open] {
+  background: var(--cds-fill-ghost-hover);
+  box-shadow: inset 0 0 0 1px var(--cds-border-strong);
+}
+
+.selector-trigger:focus-visible {
+  outline: none;
+  box-shadow:
+    inset 0 0 0 1px var(--cds-clay),
+    0 0 0 3px rgba(217, 119, 87, 0.2);
+}
+
+.selector-trigger > .chevron-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: var(--cds-text-muted);
+}
+
+.selector-trigger .muted {
+  color: var(--cds-text-muted);
+}
+
+.selector-trigger .selector-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-menu {
+  width: 240px;
+}
+
+.model-menu .provider-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.effort-menu {
+  width: 150px;
+}
+
+@container main (max-width: 540px) {
+  .selector-trigger.model .selector-label {
+    max-width: 90px;
+  }
 }

@@ -30,6 +30,10 @@ export type TranscriptMessage =
   | { role: "tool"; toolCallId: string; toolName: string; text: string; isError: boolean; artifactRevision?: number }
   | { role: "summary"; text: string };
 
+/** GET /v1/models: the models registered in the runtime's .env; key is "<provider>/<id>". */
+export type ModelChoice = { key: string; label: string; group: string; name: string; reasoning: boolean };
+export type ModelsResult = { models: ModelChoice[]; defaultModel: string; thinkingLevels: string[]; defaultThinkingLevel: string };
+
 export type ArtifactSummary = { revision: number; bytes: number; createdAt: string };
 export type ArtifactDetail = ArtifactSummary & { html: string };
 
@@ -79,6 +83,9 @@ export class Api {
   me() {
     return this.request<{ principal: { tenant: { workspace: string; userId: string } }; runtime: { model?: string } }>("GET", "/v1/me");
   }
+  models() {
+    return this.request<ModelsResult>("GET", "/v1/models");
+  }
   agents() {
     return this.request<Agent[]>("GET", "/v1/agents");
   }
@@ -108,7 +115,11 @@ export class Api {
   }
 
   /** Starts a run and feeds SSE events to onEvent until the stream ends. */
-  async run(body: { agentId: string; sessionId?: string; text: string }, onEvent: (e: RunEvent) => void, signal?: AbortSignal) {
+  async run(
+    body: { agentId: string; sessionId?: string; text: string; model?: string; thinkingLevel?: string },
+    onEvent: (e: RunEvent) => void,
+    signal?: AbortSignal,
+  ) {
     const res = await fetch("/v1/runs", { method: "POST", headers: this.headers(), body: JSON.stringify(body), signal });
     if (!res.ok || !res.body) throw new ApiError(res.status, await errorMessage(res));
     const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();

@@ -36,6 +36,7 @@ PI_MODEL_PROVIDER=custom
 PI_MODEL_PROTOCOL=openai-completions     # 或 anthropic-messages
 PI_MODEL_BASE_URL=https://openrouter.ai/api/v1
 PI_MODEL_ID=deepseek/deepseek-chat
+PI_MODEL_IDS=qwen/qwen3-max,moonshotai/kimi-k2   # 可选：同一端点的其它模型，出现在输入框的模型选择器里
 PI_MODEL_API_KEY=...
 
 # pi 内置 provider（界面上显示 provider/model）
@@ -65,12 +66,13 @@ ANTHROPIC_API_KEY=...
 |---|---|---|
 | GET | `/v1/me` | 当前身份与 runtime 信息 |
 | GET | `/v1/agents` | 当前身份可用的 agent |
+| GET | `/v1/models` | `.env` 注册的模型（`PI_MODEL_ID` + `PI_MODEL_IDS`）与可选思考强度；run 只能用这里的模型 |
 | GET | `/v1/sessions` | 用户的全部会话（跨 agent，每项带绑定的 `agentId`） |
 | GET / DELETE | `/v1/sessions/{session}` | 会话记录 / 删除 |
 | PATCH | `/v1/sessions/{session}` | `{"name"?, "pinned"?}`：重命名（pi `session_info` 条目，运行中的会话返回 409）/ 置顶（用户级偏好 `pins.json`） |
 | GET | `/v1/sessions/{session}/artifacts` | 会话的 HTML 页面版本列表 |
 | GET | `/v1/sessions/{session}/artifacts/{revision\|latest}` | 某个版本，JSON（`html` 字段），从不以 text/html 返回 |
-| POST | `/v1/runs` | `{"agentId","sessionId?","text","stream?"}`，默认返回 SSE |
+| POST | `/v1/runs` | `{"agentId","sessionId?","text","model?","thinkingLevel?","stream?"}`，默认返回 SSE |
 | GET | `/v1/runs/{run}/events?from=N` | 重放 / 续接事件流 |
 | POST | `/v1/runs/{run}/cancel` | 取消 |
 | POST | `/v1/runs/{run}/approvals/{toolCallId}` | `{"decision":"approve"\|"reject"}` |

@@ -65,6 +65,9 @@ type StartRequest struct {
 	Agent     agents.Manifest
 	SessionID string
 	Text      string
+	// Optional model choice (models.list key) and thinking level; validated by the runtime.
+	Model         string
+	ThinkingLevel string
 }
 
 func (m *Manager) Start(ctx context.Context, req StartRequest) (*Run, error) {
@@ -81,10 +84,12 @@ func (m *Manager) Start(ctx context.Context, req StartRequest) (*Run, error) {
 	defer cancel()
 	var result ipc.RunStartResult
 	err := m.rt.Call(callCtx, ipc.MethodRunStart, ipc.RunStartParams{
-		SessionScope: ipc.SessionScope{Tenant: run.Tenant, AgentID: run.AgentID},
-		RunID:        run.ID,
-		SessionID:    req.SessionID,
-		Input:        ipc.RunInput{Text: req.Text},
+		SessionScope:  ipc.SessionScope{Tenant: run.Tenant, AgentID: run.AgentID},
+		RunID:         run.ID,
+		SessionID:     req.SessionID,
+		Input:         ipc.RunInput{Text: req.Text},
+		Model:         req.Model,
+		ThinkingLevel: req.ThinkingLevel,
 	}, &result)
 	if err != nil {
 		m.release(run)
@@ -99,7 +104,8 @@ func (m *Manager) Start(ctx context.Context, req StartRequest) (*Run, error) {
 	}
 	m.mu.Unlock()
 	m.log.Info("audit: run started", "run", run.ID, "workspace", run.Tenant.Workspace, "user", run.Tenant.UserID,
-		"agent", run.AgentID, "session", run.SessionID, "key", req.Principal.KeyID, "timeout", timeout)
+		"agent", run.AgentID, "session", run.SessionID, "key", req.Principal.KeyID, "timeout", timeout,
+		"model", req.Model, "thinking", req.ThinkingLevel)
 	return run, nil
 }
 

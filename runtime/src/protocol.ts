@@ -8,6 +8,7 @@ export const PROTOCOL_VERSION = 1;
 export const Methods = {
   // gateway -> runtime (requests)
   hello: "runtime.hello",
+  modelsList: "models.list",
   runStart: "run.start",
   runCancel: "run.cancel",
   sessionList: "session.list",
@@ -37,6 +38,20 @@ export type RunStartParams = SessionScope & {
   /** Omit to start a new pi session. */
   sessionId?: string;
   input: { text: string };
+  /** A key from models.list; omit for the agent's / env default. */
+  model?: string;
+  /** off | minimal | low | medium | high | xhigh; pi clamps it to the model. */
+  thinkingLevel?: string;
+};
+
+/** One model the console may choose. key is "<provider>/<id>". */
+export type ModelChoice = { key: string; label: string; group: string; name: string; reasoning: boolean };
+
+export type ModelsResult = {
+  models: ModelChoice[];
+  defaultModel: string;
+  thinkingLevels: string[];
+  defaultThinkingLevel: string;
 };
 
 /** Returned once the run is accepted; progress arrives as run.event notifications. */

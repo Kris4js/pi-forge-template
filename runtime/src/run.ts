@@ -130,7 +130,10 @@ export class Runner {
         throw new Error(`governance extension failed: ${extensionErrors.map((e) => e.error).join("; ")}`);
       }
 
-      const { model, thinkingLevel } = this.deps.models.resolve(agent.manifest);
+      const { model, thinkingLevel } = this.deps.models.resolve(agent.manifest, {
+        model: params.model,
+        thinkingLevel: params.thinkingLevel,
+      });
       const customTools = agent.toolsFactory?.({
         tenant: scope.tenant,
         agentId: scope.agentId,

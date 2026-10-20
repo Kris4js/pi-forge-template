@@ -1,7 +1,7 @@
 import { AnimatePresence, motion, MotionConfig } from "framer-motion";
 import { AppWindow, ArrowDown, Monitor, Moon, PanelLeft, PanelRight, Sun, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { Api, type Agent, type ArtifactSummary, type Identity, type SessionSummary } from "./api";
+import { Api, type Agent, type ArtifactSummary, type Identity, type ModelsResult, type SessionSummary } from "./api";
 import { Composer, type ComposerHandle } from "./components/Composer";
 import { DetailsPanel } from "./components/DetailsPanel";
 import { PreviewLink, PreviewPanel } from "./components/PreviewPanel";
@@ -20,6 +20,8 @@ const THEME_KEY = "pi-forge.theme";
 const DETAILS_KEY = "pi-forge.details";
 const DETAILS_WIDTH = 300;
 const PREVIEW_WIDTH_KEY = "pi-forge.preview-width";
+const MODEL_KEY = "pi-forge.model";
+const EFFORT_KEY = "pi-forge.effort";
 
 type PanelTab = "preview" | "details";
 
@@ -56,6 +58,9 @@ export function App() {
   const api = useMemo(() => new Api(identity), [identity]);
 
   const [model, setModel] = useState<string>();
+  const [catalog, setCatalog] = useState<ModelsResult>();
+  const [modelKey, setModelKey] = useState<string>(() => readStored(MODEL_KEY, ""));
+  const [effort, setEffort] = useState<string>(() => readStored(EFFORT_KEY, ""));
   const [online, setOnline] = useState(false);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [agentId, setAgentId] = useState<string>();
@@ -91,6 +96,11 @@ export function App() {
   }, [panel]);
 
   useEffect(() => {
+    if (modelKey) store(MODEL_KEY, modelKey);
+    if (effort) store(EFFORT_KEY, effort);
+  }, [modelKey, effort]);
+
+  useEffect(() => {
     if (!resizing) store(PREVIEW_WIDTH_KEY, previewWidth);
   }, [previewWidth, resizing]);
 
@@ -107,6 +117,15 @@ export function App() {
         setOnline(false);
         setNotice(`无法连接 gateway：${e.message}`);
       });
+    // The selector only offers models registered in .env; a remembered choice that is gone falls back.
+    api
+      .models()
+      .then((result) => {
+        setCatalog(result);
+        setModelKey((key) => (result.models.some((m) => m.key === key) ? key : result.defaultModel));
+        setEffort((level) => (result.thinkingLevels.includes(level) ? level : result.defaultThinkingLevel));
+      })
+      .catch((e: Error) => setNotice(e.message));
     api
       .agents()
       .then((list) => {
@@ -222,7 +241,7 @@ export function App() {
     let previewOpened = false;
     try {
       await api.run(
-        { agentId, sessionId, text },
+        { agentId, sessionId, text, model: modelKey || undefined, thinkingLevel: effort || undefined },
         (event) => {
           if (event.type === "run") {
             setRunId(event.runId);
@@ -283,6 +302,7 @@ export function App() {
   }
 
   const isNewChat = items.length === 0 && !loadingSession;
+  const selectedModel = catalog?.models.find((m) => m.key === modelKey)?.label ?? model;
   const canPreview = !!agent?.preview || artifacts.length > 0;
   const panelWidth = panel === "preview" ? previewWidth : DETAILS_WIDTH;
 
@@ -311,7 +331,11 @@ export function App() {
     <Composer
       ref={composer}
       agent={agent}
-      model={model}
+      catalog={catalog}
+      model={modelKey}
+      effort={effort}
+      onModel={setModelKey}
+      onEffort={setEffort}
       busy={busy}
       autoFocus={isNewChat}
       placeholder={isNewChat ? "今天我能为您做些什么？" : undefined}
@@ -396,7 +420,7 @@ export function App() {
             <div className="top-right">
               <span className={`model-badge ${online ? "" : "offline"}`} title={online ? "runtime 在线" : "gateway 不可达"}>
                 <LiveDot tone={online ? (busy ? "clay" : "ok") : "danger"} />
-                <span className="mono">{online ? (model ?? "pi default") : "离线"}</span>
+                <span className="mono">{online ? (selectedModel ?? "pi default") : "离线"}</span>
               </span>
               <Button
                 size="icon"
@@ -527,7 +551,7 @@ export function App() {
                     <DetailsPanel
                       agent={agent}
                       identity={identity}
-                      model={model}
+                      model={selectedModel}
                       sessionId={sessionId}
                       runId={runId}
                       items={items}

@@ -58,6 +58,7 @@ peer.handle(Methods.hello, (): HelloResult => ({
   runtime: "pi-forge-runtime",
   model: models.describeDefault(),
 }));
+peer.handle(Methods.modelsList, () => models.list());
 peer.handle(Methods.runStart, (params: RunStartParams) => runner.start(params));
 peer.handle(Methods.runCancel, (params: RunCancelParams) => runner.cancel(params.runId));
 peer.handle(Methods.sessionList, (params: TenantParams) => listSessions(scopePaths(params)));

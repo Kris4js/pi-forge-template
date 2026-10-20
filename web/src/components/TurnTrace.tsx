@@ -74,8 +74,17 @@ export function TurnTrace({ body, live, startedAt, durationMs, finalStatus, onDe
   const now = useNow(live);
   const elapsed = durationMs ?? (live && startedAt ? now - startedAt : undefined);
 
-  // Nothing to trace yet (e.g. waiting for the first token): the breathing mark in the label says enough.
-  if (process.length === 0) return <Answer segments={answer} live={live} />;
+  if (process.length === 0) {
+    // Waiting for the first token: a quiet shimmering status (shadcn shimmer) instead of empty space.
+    if (live && answer.length === 0) {
+      return (
+        <p className="shimmer turn-waiting" role="status">
+          正在生成回复&hellip;
+        </p>
+      );
+    }
+    return <Answer segments={answer} live={live} />;
+  }
 
   const status = pending ? "approval" : live ? "running" : failed || finalStatus === "failed" || finalStatus === "timeout" ? "error" : undefined;
   const title = pending

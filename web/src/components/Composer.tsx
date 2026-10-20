@@ -1,7 +1,8 @@
 import { ArrowUp, Square } from "lucide-react";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
-import type { Agent } from "../api";
-import { agentIcon, ProviderIcon } from "../lib/icons";
+import type { Agent, ModelsResult } from "../api";
+import { agentIcon } from "../lib/icons";
+import { ModelSelector } from "./ModelSelector";
 import { Button } from "../ui";
 
 const MAX = 100_000;
@@ -10,7 +11,12 @@ export type ComposerHandle = { focus: () => void; fill: (text: string) => void }
 
 type Props = {
   agent?: Agent;
+  /** Registered models and the current choice; the selector hides until the catalog loads. */
+  catalog?: ModelsResult;
   model?: string;
+  effort?: string;
+  onModel?: (key: string) => void;
+  onEffort?: (level: string) => void;
   busy: boolean;
   placeholder?: string;
   autoFocus?: boolean;
@@ -19,7 +25,7 @@ type Props = {
 };
 
 export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
-  { agent, model, busy, placeholder, autoFocus, onSend, onStop },
+  { agent, catalog, model, effort, onModel, onEffort, busy, placeholder, autoFocus, onSend, onStop },
   ref,
 ) {
   const [text, setText] = useState("");
@@ -87,11 +93,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         </div>
         <div className="send-group">
           {text.length > MAX * 0.9 && <span className="input-hint">{`${text.length}/${MAX}`}</span>}
-          {model && (
-            <span className="model-label" title={model}>
-              <ProviderIcon model={model} size={14} />
-              <span className="chip-text">{model}</span>
-            </span>
+          {catalog && model && effort && onModel && onEffort && (
+            <ModelSelector catalog={catalog} model={model} effort={effort} onModel={onModel} onEffort={onEffort} />
           )}
           {busy ? (
             <Button

@@ -12,6 +12,7 @@ const ProtocolVersion = 1
 
 const (
 	MethodHello         = "runtime.hello"
+	MethodModelsList    = "models.list"
 	MethodRunStart      = "run.start"
 	MethodRunCancel     = "run.cancel"
 	MethodSessionList   = "session.list"
@@ -54,6 +55,9 @@ type RunStartParams struct {
 	RunID     string   `json:"runId"`
 	SessionID string   `json:"sessionId,omitempty"`
 	Input     RunInput `json:"input"`
+	// Model is a key from models.list; the runtime refuses models that are not registered.
+	Model         string `json:"model,omitempty"`
+	ThinkingLevel string `json:"thinkingLevel,omitempty"`
 }
 
 type RunInput struct {

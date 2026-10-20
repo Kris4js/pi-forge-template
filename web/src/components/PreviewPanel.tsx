@@ -4,7 +4,9 @@ import type { Api, ArtifactSummary } from "../api";
 import { prepareArtifactHtml, safeLinkUrl, type FrameMessage } from "../lib/artifact-frame";
 import { EMPTY_DRAFT_DOCUMENT, patchDraftDocument } from "../lib/draft-preview";
 import { Button } from "../ui";
+import { Card, CardContent, CardHeader } from "./ui/card";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "./ui/select";
+import { Skeleton } from "./ui/skeleton";
 
 /** Lets transcript items (e.g. a publish_design step) open a revision in the preview. */
 export const PreviewLink = createContext<((revision: number) => void) | null>(null);
@@ -75,6 +77,9 @@ export function PreviewPanel({ api, sessionId, artifacts, revision, onRevision, 
   const onOpen = useCallback((url: string) => setLink((current) => current ?? url), []);
 
   const current = html && html.key === key ? html.html : null;
+  // Loading = waiting for the agent's first draft, fetching a version, or a fetched page not yet painted.
+  const loading =
+    !error && !draftLayer && ((live && !current) || (!!key && !current) || (!!current && paintedKey !== key));
   const versionItems = [
     { label: `v${latest}（最新）`, value: "latest" },
     ...[...artifacts]
@@ -172,10 +177,15 @@ export function PreviewPanel({ api, sessionId, artifacts, revision, onRevision, 
         <div className="preview-device" style={width ? { width: `min(100%, ${width}px)` } : undefined}>
           {current && key && <ArtifactFrame key={`${key}#${nonce}`} frameKey={key} html={current} onPainted={onPainted} onOpen={onOpen} />}
           {draftLayer && <DraftFrame html={draftLayer} />}
-          {!current && !draftLayer && (
-            <div className="preview-empty">
-              {error ? <p className="error">{error}</p> : live ? <p>等待 agent 开始写页面…</p> : <p>这个会话还没有生成页面</p>}
+          {loading ? (
+            <div className="preview-loading" role="status" aria-label="页面加载中">
+              <SkeletonCard />
             </div>
+          ) : (
+            !current &&
+            !draftLayer && (
+              <div className="preview-empty">{error ? <p className="error">{error}</p> : <p>这个会话还没有生成页面</p>}</div>
+            )
           )}
         </div>
       </div>
@@ -263,6 +273,8 @@ function ArtifactFrame({
       sandbox="allow-scripts"
       referrerPolicy="no-referrer"
       srcDoc={srcDoc}
+      // Backstop for documents that never report "painted" (e.g. the unpreviewable fallback).
+      onLoad={() => setTimeout(() => onPainted(frameKey), 1500)}
     />
   );
 }
@@ -322,4 +334,19 @@ function DraftFrame({ html }: { html: string }) {
 function renderable(html: string): boolean {
   const body = /<body[^>]*>/i.exec(html);
   return body != null && /<[a-z]/i.test(html.slice(body.index + body[0].length));
+}
+
+/** shadcn's SkeletonCard: what the preview shows while a page is on its way. */
+function SkeletonCard() {
+  return (
+    <Card>
+      <CardHeader>
+        <Skeleton className="skeleton-line" style={{ width: "66%" }} />
+        <Skeleton className="skeleton-line" style={{ width: "50%" }} />
+      </CardHeader>
+      <CardContent>
+        <Skeleton className="skeleton-media" />
+      </CardContent>
+    </Card>
+  );
 }

@@ -48,6 +48,7 @@ func (s *Server) Handler() http.Handler {
 	})
 	mux.Handle("GET /v1/me", s.authed(s.me))
 	mux.Handle("GET /v1/agents", s.authed(s.listAgents))
+	mux.Handle("GET /v1/models", s.authed(s.listModels))
 	mux.Handle("GET /v1/sessions", s.authed(s.listSessions))
 	mux.Handle("GET /v1/sessions/{session}", s.authed(s.getSession))
 	mux.Handle("PATCH /v1/sessions/{session}", s.authed(s.updateSession))
@@ -257,8 +258,21 @@ type startRunBody struct {
 	AgentID   string `json:"agentId"`
 	SessionID string `json:"sessionId,omitempty"`
 	Text      string `json:"text"`
+	// Model is a key from GET /v1/models; ThinkingLevel one of its thinkingLevels.
+	Model         string `json:"model,omitempty"`
+	ThinkingLevel string `json:"thinkingLevel,omitempty"`
 	// Stream defaults to true (SSE). false waits for the run and returns JSON.
 	Stream *bool `json:"stream,omitempty"`
+}
+
+// listModels returns the models registered in the runtime's .env, which are the only ones a run may use.
+func (s *Server) listModels(w http.ResponseWriter, r *http.Request, p auth.Principal) error {
+	var out json.RawMessage
+	if err := s.Runtime.Call(r.Context(), ipc.MethodModelsList, struct{}{}, &out); err != nil {
+		return err
+	}
+	writeRaw(w, http.StatusOK, out)
+	return nil
 }
 
 func (s *Server) startRun(w http.ResponseWriter, r *http.Request, p auth.Principal) error {
@@ -275,7 +289,9 @@ func (s *Server) startRun(w http.ResponseWriter, r *http.Request, p auth.Princip
 	if err != nil {
 		return err
 	}
-	run, err := s.Runs.Start(r.Context(), runs.StartRequest{Principal: p, Agent: m, SessionID: body.SessionID, Text: body.Text})
+	run, err := s.Runs.Start(r.Context(), runs.StartRequest{
+		Principal: p, Agent: m, SessionID: body.SessionID, Text: body.Text, Model: body.Model, ThinkingLevel: body.ThinkingLevel,
+	})
 	if err != nil {
 		return err
 	}
