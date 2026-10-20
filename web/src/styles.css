@@ -1455,6 +1455,7 @@ kbd {
 /* ---------- new chat ---------- */
 
 .new-chat-screen {
+  --new-chat-composer-gap: 28px;
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -1469,7 +1470,7 @@ kbd {
   align-items: center;
   justify-content: center;
   gap: 14px;
-  margin: 0 0 28px;
+  margin: 0 0 var(--new-chat-composer-gap);
   font-family: var(--font-serif);
   font-size: 40px;
   font-weight: 400;
@@ -1483,7 +1484,7 @@ kbd {
 }
 
 .new-chat-below {
-  margin-top: 16px;
+  margin-top: var(--new-chat-composer-gap);
   padding: 0 14px;
 }
 

@@ -44,7 +44,7 @@ export function NewChat({ agents, agentId, userName, composer, onAgent, onPick }
       >
         <ClaudeMark size={38} />
         <span>
-          {greeting()}，{userName}
+          {greeting()}，{userName.charAt(0).toUpperCase() + userName.slice(1)}
         </span>
       </motion.h1>
 
