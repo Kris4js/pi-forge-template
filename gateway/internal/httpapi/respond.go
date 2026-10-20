@@ -23,7 +23,10 @@ func (e apiError) Error() string { return e.message }
 func (s *Server) writeErr(w http.ResponseWriter, err error) {
 	var api apiError
 	var rpc *ipc.Error
+	var tooLarge *http.MaxBytesError
 	switch {
+	case errors.As(err, &tooLarge):
+		api = apiError{http.StatusRequestEntityTooLarge, "body_too_large", "request body too large"}
 	case errors.As(err, &api):
 	case errors.Is(err, auth.ErrUnauthenticated):
 		api = apiError{http.StatusUnauthorized, "unauthenticated", "missing or invalid API key"}

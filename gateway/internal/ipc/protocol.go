@@ -60,8 +60,15 @@ type RunStartParams struct {
 	ThinkingLevel string `json:"thinkingLevel,omitempty"`
 }
 
+type Attachment struct {
+	Name     string `json:"name"`
+	MimeType string `json:"mimeType"`
+	Data     string `json:"data"`
+}
+
 type RunInput struct {
-	Text string `json:"text"`
+	Text        string       `json:"text"`
+	Attachments []Attachment `json:"attachments,omitempty"`
 }
 
 type RunStartResult struct {

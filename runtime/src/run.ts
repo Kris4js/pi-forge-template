@@ -8,6 +8,8 @@ import {
   type AgentSessionEvent,
 } from "@earendil-works/pi-coding-agent";
 import type { AgentCatalog, AgentManifest } from "./agents/manifest.ts";
+import { saveAttachments, validateAttachments } from "./attachments.ts";
+import type { ImageContent } from "@earendil-works/pi-ai";
 import { ArtifactStore } from "./artifacts/store.ts";
 import { governanceExtension } from "./governance.ts";
 import { RpcError, type Peer } from "./ipc/peer.ts";
@@ -57,7 +59,9 @@ export class Runner {
   async start(params: RunStartParams): Promise<RunStartResult> {
     const scope = assertScope(params);
     const runId = params.runId;
-    const text = params.input?.text;
+    let text = params.input?.text;
+    const attachments = validateAttachments(params.input?.attachments);
+    if (typeof text === "string" && !text.trim() && attachments.length) text = "请查看所附文件。";
     if (typeof runId !== "string" || !runId) throw new RpcError(ErrorCodes.invalidParams, "invalid runId");
     if (typeof text !== "string" || !text.trim()) throw new RpcError(ErrorCodes.invalidParams, "input.text is required");
     if (this.active.has(runId)) throw new RpcError(ErrorCodes.conflict, "run already exists");
@@ -68,6 +72,7 @@ export class Runner {
     const emit = (event: RunEvent) => this.deps.peer.notify(Methods.runEvent, { runId, seq: seq++, event });
 
     let session: AgentSession;
+    let images: ImageContent[] = [];
     let preview: AgentManifest["preview"];
     try {
       const agent = await this.deps.catalog.get(scope.agentId).catch((error: Error) => {
@@ -156,7 +161,14 @@ export class Runner {
         settingsManager,
       }));
       run.session = session;
+      if (attachments.some((file) => file.mimeType.startsWith("image/")) && !session.model?.input.includes("image")) {
+        throw new RpcError(ErrorCodes.invalidParams, "当前模型不支持图片，请切换视觉模型");
+      }
+      const saved = await saveAttachments(paths.userHome, attachments);
+      text += saved.text;
+      images = saved.images;
     } catch (error) {
+      run.session?.dispose();
       this.finish(run);
       throw error;
     }
@@ -168,7 +180,7 @@ export class Runner {
       agentId: scope.agentId,
       model: session.model ? Models.label(session.model) : undefined,
     });
-    void this.execute(run, session, text, emit, preview);
+    void this.execute(run, session, text, emit, preview, images);
     return { sessionId };
   }
 
@@ -191,6 +203,7 @@ export class Runner {
     text: string,
     emit: (e: RunEvent) => void,
     preview: AgentManifest["preview"],
+    images: ImageContent[],
   ) {
     const usage: Usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0 };
     const drafts = new Map<string, string>();
@@ -207,7 +220,7 @@ export class Runner {
     let status: RunStatus = "completed";
     let error: string | undefined;
     try {
-      if (!run.cancelled) await session.prompt(text, { source: "rpc" });
+      if (!run.cancelled) await session.prompt(text, { source: "rpc", images });
       if (run.cancelled || lastStop?.reason === "aborted") status = "cancelled";
       else if (lastStop?.reason === "error") {
         status = "failed";

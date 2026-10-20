@@ -10,7 +10,7 @@
 | method | params | result |
 |---|---|---|
 | `runtime.hello` | `{}` | `{protocolVersion, runtime, model?}`，握手时校验协议版本 |
-| `run.start` | `{runId, tenant:{workspace,userId}, agentId, sessionId?, input:{text}}` | `{sessionId}`，表示 run 已被接受，后续进度通过 `run.event` 推送 |
+| `run.start` | `{runId, tenant:{workspace,userId}, agentId, sessionId?, input:{text, attachments?:[{name,mimeType,data}]}}` | `{sessionId}`，表示 run 已被接受，后续进度通过 `run.event` 推送 |
 | `run.cancel` | `{runId}` | `{cancelled}` |
 | `session.list` | `{tenant, agentId}` | `SessionSummary[]` |
 | `session.get` | `{tenant, agentId, sessionId}` | `{id, name?, messages: TranscriptMessage[]}` |

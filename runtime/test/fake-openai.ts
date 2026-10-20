@@ -10,7 +10,7 @@ import type { AddressInfo } from "node:net";
  */
 type ChatMessage = { role: string; content?: unknown; tool_call_id?: string; name?: string };
 
-export async function startFakeOpenAI(options: { chunkDelayMs?: number } = {}): Promise<{ baseUrl: string; close: () => Promise<void> }> {
+export async function startFakeOpenAI(options: { chunkDelayMs?: number; onRequest?: (body: { model: string; messages: ChatMessage[] }) => void } = {}): Promise<{ baseUrl: string; close: () => Promise<void> }> {
   const pause = () => (options.chunkDelayMs ? new Promise((r) => setTimeout(r, options.chunkDelayMs)) : undefined);
   let calls = 0;
   const server: Server = createServer((req, res) => {
@@ -23,6 +23,7 @@ export async function startFakeOpenAI(options: { chunkDelayMs?: number } = {}): 
     req.on("data", (chunk) => (raw += chunk));
     req.on("end", async () => {
       const body = JSON.parse(raw) as { model: string; messages: ChatMessage[] };
+      options.onRequest?.(body);
       res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
       const id = `chatcmpl-${++calls}`;
       const chunk = (delta: unknown, finish: string | null = null, extra: object = {}) =>

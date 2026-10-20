@@ -61,10 +61,11 @@ func NewManager(rt Caller, limits Limits, log *slog.Logger) *Manager {
 }
 
 type StartRequest struct {
-	Principal auth.Principal
-	Agent     agents.Manifest
-	SessionID string
-	Text      string
+	Principal   auth.Principal
+	Agent       agents.Manifest
+	SessionID   string
+	Text        string
+	Attachments []ipc.Attachment
 	// Optional model choice (models.list key) and thinking level; validated by the runtime.
 	Model         string
 	ThinkingLevel string
@@ -87,7 +88,7 @@ func (m *Manager) Start(ctx context.Context, req StartRequest) (*Run, error) {
 		SessionScope:  ipc.SessionScope{Tenant: run.Tenant, AgentID: run.AgentID},
 		RunID:         run.ID,
 		SessionID:     req.SessionID,
-		Input:         ipc.RunInput{Text: req.Text},
+		Input:         ipc.RunInput{Text: req.Text, Attachments: req.Attachments},
 		Model:         req.Model,
 		ThinkingLevel: req.ThinkingLevel,
 	}, &result)

@@ -148,3 +148,18 @@ func TestRuntimeCrashFailsInflightRuns(t *testing.T) {
 		t.Fatalf("status = %s", run.Status())
 	}
 }
+
+func TestAttachmentsForwardedToRuntime(t *testing.T) {
+	m, rt := newTestManager(Limits{RunTimeout: time.Minute})
+	files := []ipc.Attachment{{Name: "notes.txt", MimeType: "text/plain", Data: "aGk="}}
+	run, err := m.Start(context.Background(), StartRequest{Principal: alice, Agent: agents.Manifest{ID: "a"}, Attachments: files})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer finish(m, run)
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if len(rt.started) != 1 || len(rt.started[0].Input.Attachments) != 1 || rt.started[0].Input.Attachments[0] != files[0] {
+		t.Fatal("attachments not forwarded")
+	}
+}

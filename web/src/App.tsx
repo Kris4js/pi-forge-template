@@ -8,6 +8,7 @@ import { PreviewLink, PreviewPanel } from "./components/PreviewPanel";
 import { MessageList } from "./components/MessageList";
 import { Sidebar, sessionTitle } from "./components/Sidebar";
 import { NewChat } from "./components/NewChat";
+import { encodeAttachments } from "./lib/attachments";
 import { agentIcon } from "./lib/icons";
 import { applyEvent, fromTranscript, userItem, type Item } from "./conversation";
 import { useScrollPinning } from "./hooks/useScrollPinning";
@@ -227,10 +228,12 @@ export function App() {
     setModal(undefined);
   }
 
-  async function send(text: string) {
-    if (!agentId || !text.trim() || busy) return;
+  async function send(text: string, files: File[] = []) {
+    if (!agentId || (!text.trim() && !files.length) || busy) return;
+    const attachments = await encodeAttachments(files);
+    const displayText = [text, ...files.map((file) => `📎 ${file.name}`)].filter(Boolean).join("\n");
     setNotice(undefined);
-    setItems((prev) => [...prev, userItem(text)]);
+    setItems((prev) => [...prev, userItem(displayText)]);
     requestAnimationFrame(() => scroll.scrollToBottom(true));
     const controller = new AbortController();
     abortRef.current = controller;
@@ -241,7 +244,7 @@ export function App() {
     let previewOpened = false;
     try {
       await api.run(
-        { agentId, sessionId, text, model: modelKey || undefined, thinkingLevel: effort || undefined },
+        { agentId, sessionId, text, attachments, model: modelKey || undefined, thinkingLevel: effort || undefined },
         (event) => {
           if (event.type === "run") {
             setRunId(event.runId);
@@ -277,7 +280,10 @@ export function App() {
         controller.signal,
       );
     } catch (e) {
-      if (!controller.signal.aborted) setNotice((e as Error).message);
+      if (!controller.signal.aborted) {
+        setNotice((e as Error).message);
+        throw e;
+      }
     } finally {
       abortRef.current = undefined;
       setBusy(false);
@@ -339,7 +345,7 @@ export function App() {
       busy={busy}
       autoFocus={isNewChat}
       placeholder={isNewChat ? "今天我能为您做些什么？" : undefined}
-      onSend={(t) => void send(t)}
+      onSend={send}
       onStop={() => void stop()}
     />
   );
@@ -484,7 +490,7 @@ export function App() {
                     agentName={agent?.name ?? "agent"}
                     busy={busy}
                     onDecide={runId ? decide : undefined}
-                    onRetry={busy ? undefined : (text) => void send(text)}
+                    onRetry={busy ? undefined : (text) => { void send(text).catch(() => {}); }}
                   />
                 </PreviewLink.Provider>
               )}

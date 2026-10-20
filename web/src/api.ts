@@ -116,7 +116,7 @@ export class Api {
 
   /** Starts a run and feeds SSE events to onEvent until the stream ends. */
   async run(
-    body: { agentId: string; sessionId?: string; text: string; model?: string; thinkingLevel?: string },
+    body: { agentId: string; sessionId?: string; text: string; attachments?: Array<{ name: string; mimeType: string; data: string }>; model?: string; thinkingLevel?: string },
     onEvent: (e: RunEvent) => void,
     signal?: AbortSignal,
   ) {

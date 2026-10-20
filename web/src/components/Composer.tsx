@@ -2,6 +2,7 @@ import { ArrowUp, Square } from "lucide-react";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { Agent, ModelsResult } from "../api";
 import { agentIcon } from "../lib/icons";
+import { AttachmentButton, AttachmentPreview } from "./AttachmentButton";
 import { ModelSelector } from "./ModelSelector";
 import { Button } from "../ui";
 
@@ -20,7 +21,7 @@ type Props = {
   busy: boolean;
   placeholder?: string;
   autoFocus?: boolean;
-  onSend: (text: string) => void;
+  onSend: (text: string, files: File[]) => Promise<void>;
   onStop: () => void;
 };
 
@@ -29,6 +30,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   ref,
 ) {
   const [text, setText] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState("");
   const area = useRef<HTMLTextAreaElement>(null);
 
   useImperativeHandle(ref, () => ({
@@ -50,10 +54,17 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     el.style.height = `${el.scrollHeight}px`;
   }, [text]);
 
-  const submit = () => {
-    if (!text.trim() || busy || !agent) return;
-    onSend(text);
-    setText("");
+  const submit = async () => {
+    if ((!text.trim() && !files.length) || busy || sending || !agent) return;
+    setSending(true);
+    setError("");
+    try {
+      await onSend(text, files);
+      setText("");
+      setFiles([]);
+    } catch (error) {
+      setError((error as Error).message);
+    } finally { setSending(false); }
   };
 
   return (
@@ -64,6 +75,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         submit();
       }}
     >
+      {files.length > 0 && <div className="composer-attachments">{files.map((file, index) => <AttachmentPreview key={`${index}-${file.name}`} file={file} disabled={busy || sending} onRemove={() => setFiles((prev) => prev.filter((_, i) => i !== index))} />)}</div>}
+      {error && <div className="attachment-error" role="alert">{error}</div>}
       <textarea
         ref={area}
         value={text}
@@ -72,7 +85,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         autoFocus={autoFocus}
         aria-label="输入消息"
         placeholder={placeholder ?? (agent ? `给「${agent.name}」发消息…` : "请先选择一个 agent")}
-        disabled={!agent}
+        disabled={!agent || sending}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
           if (e.nativeEvent.isComposing || e.keyCode === 229) return;
@@ -84,6 +97,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       />
       <div className="composer-tools">
         <div className="composer-left">
+          <AttachmentButton files={files} onChange={setFiles} disabled={!agent || busy || sending} />
           {agent && (
             <span className="chip" title={agent.description}>
               {agentIcon(agent.id, 13)}
@@ -112,7 +126,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
               className="send"
               aria-label="发送"
               title="发送"
-              disabled={!text.trim() || !agent}
+              disabled={(!text.trim() && !files.length) || !agent || sending}
               icon={<ArrowUp size={19} />}
             />
           )}

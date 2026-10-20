@@ -33,11 +33,13 @@ export type SessionScope = TenantParams & { agentId: string };
 
 export type HelloResult = { protocolVersion: number; runtime: string; model?: string };
 
+export type Attachment = { name: string; mimeType: string; data: string };
+
 export type RunStartParams = SessionScope & {
   runId: string;
   /** Omit to start a new pi session. */
   sessionId?: string;
-  input: { text: string };
+  input: { text: string; attachments?: Attachment[] };
   /** A key from models.list; omit for the agent's / env default. */
   model?: string;
   /** off | minimal | low | medium | high | xhigh; pi clamps it to the model. */

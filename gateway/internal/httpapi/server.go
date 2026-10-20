@@ -69,7 +69,11 @@ func (s *Server) authed(h handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p, err := s.Auth.Authenticate(r)
 		if err == nil {
-			r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+			limit := int64(maxBodyBytes)
+			if r.Method == http.MethodPost && r.URL.Path == "/v1/runs" {
+				limit = 12 << 20
+			}
+			r.Body = http.MaxBytesReader(w, r.Body, limit)
 			err = h(w, r, p)
 		}
 		if err != nil {
@@ -255,9 +259,10 @@ func (s *Server) getArtifact(w http.ResponseWriter, r *http.Request, p auth.Prin
 }
 
 type startRunBody struct {
-	AgentID   string `json:"agentId"`
-	SessionID string `json:"sessionId,omitempty"`
-	Text      string `json:"text"`
+	AgentID     string           `json:"agentId"`
+	SessionID   string           `json:"sessionId,omitempty"`
+	Text        string           `json:"text"`
+	Attachments []ipc.Attachment `json:"attachments,omitempty"`
 	// Model is a key from GET /v1/models; ThinkingLevel one of its thinkingLevels.
 	Model         string `json:"model,omitempty"`
 	ThinkingLevel string `json:"thinkingLevel,omitempty"`
@@ -280,9 +285,13 @@ func (s *Server) startRun(w http.ResponseWriter, r *http.Request, p auth.Princip
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&body); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			return err
+		}
 		return apiError{http.StatusBadRequest, "invalid_json", err.Error()}
 	}
-	if strings.TrimSpace(body.Text) == "" || len(body.Text) > maxInputLen {
+	if (strings.TrimSpace(body.Text) == "" && len(body.Attachments) == 0) || len(body.Text) > maxInputLen || len(body.Attachments) > 4 {
 		return apiError{http.StatusBadRequest, "invalid_input", "text must be 1..100000 characters"}
 	}
 	m, err := s.agent(r, p, body.AgentID)
@@ -290,7 +299,7 @@ func (s *Server) startRun(w http.ResponseWriter, r *http.Request, p auth.Princip
 		return err
 	}
 	run, err := s.Runs.Start(r.Context(), runs.StartRequest{
-		Principal: p, Agent: m, SessionID: body.SessionID, Text: body.Text, Model: body.Model, ThinkingLevel: body.ThinkingLevel,
+		Principal: p, Agent: m, SessionID: body.SessionID, Text: body.Text, Attachments: body.Attachments, Model: body.Model, ThinkingLevel: body.ThinkingLevel,
 	})
 	if err != nil {
 		return err

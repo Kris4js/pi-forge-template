@@ -82,6 +82,8 @@ curl -N -X POST localhost:8090/v1/runs -H 'X-Workspace: acme' -H 'X-User-Id: ali
   -d '{"agentId":"assistant","text":"你好"}'
 ```
 
+附件通过输入框「＋ → 上传照片和文件」选择，随 `/v1/runs` 请求的 `attachments: [{name,mimeType,data}]`（原始 Base64，不含 data URL 前缀）一起发送。支持 PNG/JPEG/WebP 与 UTF-8 的 txt/md/csv/json/yaml/yml/log；最多 4 个，图片单个 4 MB、文本单个 100 KB、总计 8 MB。仅此路由允许 12 MiB 请求体，其他路由仍为 1 MiB。文件落入当前用户的 `attachments/<随机ID>/`；图片作为视觉输入、文本作为附件上下文交给模型。无文字时也可发送；不支持视觉的模型会拒绝图片。首版不支持 PDF/Office、历史图片缩略图及附件自动清理，删除会话不会删除用户附件。
+
 SSE 事件依次为：`run`（runId / sessionId）→ `run_started` → `text_delta` / `thinking_delta` / `tool_start` / `approval_required` / `approval_resolved` / `tool_end` / `message_end` / `compaction` / `artifact_draft` / `artifact` → `run_finished`（`completed | failed | cancelled | timeout`）。
 
 ## 开发

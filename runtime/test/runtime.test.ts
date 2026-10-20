@@ -23,6 +23,7 @@ const tenant = { workspace: "acme", userId: "u1" };
 let child: ChildProcessWithoutNullStreams;
 let peer: Peer;
 let dataDir: string;
+let lastModelRequest: unknown;
 let model: Awaited<ReturnType<typeof startFakeOpenAI>>;
 const events = new Map<string, RunEvent[]>();
 const finished = new Map<string, () => void>();
@@ -32,7 +33,7 @@ let decide: (p: ToolAuthorizeParams) => Decision | Promise<Decision> = () => ({ 
 
 before(async () => {
   dataDir = await mkdtemp(join(tmpdir(), "pi-forge-test-"));
-  model = await startFakeOpenAI();
+  model = await startFakeOpenAI({ onRequest: (body) => { lastModelRequest = body; } });
   child = spawn(process.execPath, ["--import", "tsx", join(root, "runtime/src/main.ts")], {
     cwd: root,
     env: {
@@ -311,4 +312,27 @@ test("the console can pick any registered model and thinking level, and nothing 
     peer.request("run.start", { runId: "m3", tenant, agentId: "assistant", input: { text: "x" }, thinkingLevel: "max" }),
     /invalid thinkingLevel/,
   );
+});
+
+
+test("attachments cross IPC into the model and remain isolated from other users", async () => {
+  const data = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a1S0AAAAASUVORK5CYII=";
+  const runId = "attachment-run";
+  const done = new Promise<void>((resolve) => finished.set(runId, resolve));
+  const started = await peer.request<{ sessionId: string }>("run.start", {
+    runId, tenant, agentId: "assistant", input: { text: "", attachments: [
+      { name: "product.png", mimeType: "image/png", data },
+      { name: "spec.txt", mimeType: "text/plain", data: Buffer.from("capacity 500ml").toString("base64") },
+    ] },
+  });
+  await done;
+  assert.equal((events.get(runId)!.at(-1) as { status: string }).status, "completed");
+  assert.match(JSON.stringify(lastModelRequest), /data:image\/png;base64,/);
+  assert.match(JSON.stringify(lastModelRequest), /capacity 500ml/);
+  const detail = await peer.request<SessionDetail>("session.get", { tenant, sessionId: started.sessionId });
+  assert.match(JSON.stringify(detail.messages), /product.png/);
+  await assert.rejects(peer.request("session.get", { tenant: { ...tenant, userId: "u2" }, sessionId: started.sessionId }));
+  await assert.rejects(peer.request("run.start", { runId: "invalid-attachment", tenant, agentId: "assistant", input: {
+    text: "test", attachments: [{ name: "../escape.txt", mimeType: "text/plain", data: "eA==" }],
+  } }), /附件名称无效/);
 });
