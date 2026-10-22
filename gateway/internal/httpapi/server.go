@@ -493,16 +493,30 @@ func (s *Server) decide(w http.ResponseWriter, r *http.Request, p auth.Principal
 	return nil
 }
 
-// answer resolves an ask_user question: {"answer": "..."} or {"skip": true}.
+// answer resolves an ask_user call: {"answers": [{"selected": [...], "other": "..."}, ...]}, one entry
+// per question in order, or {"skip": true}.
 func (s *Server) answer(w http.ResponseWriter, r *http.Request, p auth.Principal) error {
 	var body struct {
-		Answer string `json:"answer"`
-		Skip   bool   `json:"skip"`
+		Answers []ipc.AskAnswer `json:"answers"`
+		Skip    bool            `json:"skip"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || (!body.Skip && strings.TrimSpace(body.Answer) == "") || len(body.Answer) > 4000 {
-		return apiError{http.StatusBadRequest, "invalid_answer", `body must set "answer" (1..4000 characters) or "skip": true`}
+	invalid := apiError{http.StatusBadRequest, "invalid_answer", `body must set "answers" (one {"selected", "other"} per question) or "skip": true`}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || (!body.Skip && len(body.Answers) == 0) || len(body.Answers) > 8 {
+		return invalid
 	}
-	if err := s.Runs.Answer(p, r.PathValue("run"), r.PathValue("toolCall"), strings.TrimSpace(body.Answer), body.Skip); err != nil {
+	for i := range body.Answers {
+		a := &body.Answers[i]
+		a.Other = strings.TrimSpace(a.Other)
+		if len(a.Other) > 4000 || len(a.Selected) > 12 {
+			return invalid
+		}
+	}
+	err := s.Runs.Answer(p, r.PathValue("run"), r.PathValue("toolCall"), body.Answers, body.Skip)
+	var bad runs.ErrInvalidAnswer
+	if errors.As(err, &bad) {
+		return apiError{http.StatusBadRequest, "invalid_answer", bad.Reason}
+	}
+	if err != nil {
 		return err
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})

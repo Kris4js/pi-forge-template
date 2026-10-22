@@ -179,8 +179,8 @@ export class Runner {
       // Built-in runtime tools are opted into per agent through the manifest allowlist.
       if (agent.manifest.tools?.includes(ASK_USER)) {
         customTools.push(
-          askUserTool((toolCallId, question, options, signal) =>
-            this.deps.peer.request<UserAskResult>(Methods.userAsk, { runId, toolCallId, question, options } satisfies UserAskParams, signal),
+          askUserTool((toolCallId, questions, signal) =>
+            this.deps.peer.request<UserAskResult>(Methods.userAsk, { runId, toolCallId, questions } satisfies UserAskParams, signal),
           ),
         );
       }

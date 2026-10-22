@@ -39,7 +39,7 @@ agents/<id>/
 
 | 工具 | 作用 |
 | --- | --- |
-| `ask_user` | 向用户提一个选择题（2–6 个选项，可自由填写或跳过）并等待回答，最长 `FORGE_QUESTION_TIMEOUT_MS`（默认 24 小时）；等待期间暂停 run 计时、不占并发名额，刷新页面后可继续作答 |
+| `ask_user` | 向用户提 1–4 个问题（多个时以标签页呈现），每题 2–6 个选项，可设 `multiSelect` 允许多选；用户也可自由填写或跳过。等待回答最长 `FORGE_QUESTION_TIMEOUT_MS`（默认 24 小时），期间暂停 run 计时、不占并发名额，刷新页面后可继续作答 |
 
 某个 agent 不需要时，在 `policy.tools` 里设为 `"deny"` 即可关闭（例如 `"ask_user": "deny"`）。
 

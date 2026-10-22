@@ -939,6 +939,80 @@ kbd {
   animation: ask-user-in 180ms var(--ease-out) both;
 }
 
+/* Several questions: a row of tabs above the current one; a check marks the answered ones. */
+.ask-user-tabs {
+  display: flex;
+  gap: 4px;
+  margin: -4px -8px 10px;
+  padding-bottom: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  border-bottom: 1px solid var(--cds-border-subtle);
+}
+
+.ask-user-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.ask-user-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  height: 30px;
+  padding: 0 12px 0 8px;
+  border-radius: 999px;
+  font-size: 13px;
+  white-space: nowrap;
+  color: var(--cds-text-secondary);
+  transition:
+    background-color 120ms var(--ease-out),
+    color 120ms var(--ease-out);
+}
+
+.ask-user-tabs button:hover {
+  color: var(--cds-text-primary);
+  background: var(--cds-fill-ghost-hover);
+}
+
+.ask-user-tabs button.on {
+  font-weight: 500;
+  color: var(--cds-text-primary);
+  background: var(--cds-fill-ghost-selected);
+}
+
+.ask-user-tabs button.done svg {
+  color: var(--ok);
+}
+
+.ask-user-tab-index {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--cds-text-muted);
+  box-shadow: inset 0 0 0 1px var(--cds-border-strong);
+}
+
+.ask-user-hint {
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 500;
+  vertical-align: 2px;
+  color: var(--cds-text-secondary);
+  background: var(--cds-fill-ghost-hover);
+}
+
+.ask-user-step {
+  display: inline-flex;
+  gap: 2px;
+}
+
 .ask-user > header {
   display: flex;
   align-items: center;
@@ -1002,6 +1076,11 @@ kbd {
 
 .ask-user li button.picked {
   font-weight: 500;
+}
+
+/* Multi-select options read as checkboxes. */
+.ask-user-index.box {
+  border-radius: 6px;
 }
 
 .ask-user li button.picked .ask-user-index {

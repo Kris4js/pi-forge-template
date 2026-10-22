@@ -164,6 +164,11 @@ func TestAttachmentsForwardedToRuntime(t *testing.T) {
 	}
 }
 
+var twoQuestions = []ipc.AskQuestion{
+	{Header: "One", Question: "Q?", Options: []string{"a", "b"}},
+	{Header: "Many", Question: "Which?", Options: []string{"x", "y", "z"}, MultiSelect: true},
+}
+
 func TestQuestionWaitsOnTheUser(t *testing.T) {
 	m, _ := newTestManager(Limits{MaxConcurrent: 1, RunTimeout: 150 * time.Millisecond, QuestionTimeout: time.Minute})
 	agent := agents.Manifest{ID: "a"}
@@ -173,7 +178,7 @@ func TestQuestionWaitsOnTheUser(t *testing.T) {
 	}
 	result := make(chan ipc.UserAskResult)
 	go func() {
-		result <- m.Ask(context.Background(), ipc.UserAskParams{RunID: run.ID, ToolCallID: "q1", Question: "Q?", Options: []string{"a", "b"}})
+		result <- m.Ask(context.Background(), ipc.UserAskParams{RunID: run.ID, ToolCallID: "q1", Questions: twoQuestions})
 	}()
 	events, _, _ := run.Next(context.Background(), 0)
 	if events[0].Type != "question" || !run.Waiting() {
@@ -196,20 +201,37 @@ func TestQuestionWaitsOnTheUser(t *testing.T) {
 	if got := m.SessionRun(alice, "s1"); got != run {
 		t.Fatal("session run lookup failed")
 	}
-	if _, qs := run.Pending(); len(qs) != 1 || qs[0]["question"] != "Q?" {
+	if _, qs := run.Pending(); len(qs) != 1 || len(qs[0]["questions"].([]ipc.AskQuestion)) != 2 {
 		t.Fatalf("pending questions = %v", qs)
 	}
+	good := []ipc.AskAnswer{{Selected: []string{"a"}}, {Selected: []string{"x", "z"}, Other: "and w"}}
 	bob := auth.Principal{Tenant: tenant.Tenant{Workspace: "acme", UserID: "bob"}}
-	if err := m.Answer(bob, run.ID, "q1", "a", false); !errors.Is(err, ErrForbidden) {
+	if err := m.Answer(bob, run.ID, "q1", good, false); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("another user must not answer: %v", err)
 	}
-	if err := m.Answer(alice, run.ID, "q1", "a", false); err != nil {
+	// Answers that do not fit the questions are rejected and the call keeps waiting.
+	for name, bad := range map[string][]ipc.AskAnswer{
+		"too few":          {{Selected: []string{"a"}}},
+		"two on single":    {{Selected: []string{"a", "b"}}, {Selected: []string{"x"}}},
+		"unknown option":   {{Selected: []string{"nope"}}, {Selected: []string{"x"}}},
+		"duplicate choice": {{Selected: []string{"a"}}, {Selected: []string{"x", "x"}}},
+		"empty answer":     {{Selected: []string{"a"}}, {}},
+	} {
+		var invalid ErrInvalidAnswer
+		if err := m.Answer(alice, run.ID, "q1", bad, false); !errors.As(err, &invalid) {
+			t.Fatalf("%s: expected ErrInvalidAnswer, got %v", name, err)
+		}
+	}
+	if !run.Waiting() {
+		t.Fatal("a rejected answer must leave the question open")
+	}
+	if err := m.Answer(alice, run.ID, "q1", good, false); err != nil {
 		t.Fatal(err)
 	}
-	if got := <-result; got.Status != "answered" || got.Answer != "a" {
+	if got := <-result; got.Status != "answered" || len(got.Answers) != 2 || got.Answers[1].Other != "and w" {
 		t.Fatalf("result = %+v", got)
 	}
-	if err := m.Answer(alice, run.ID, "q1", "a", false); !errors.Is(err, ErrNoQuestion) {
+	if err := m.Answer(alice, run.ID, "q1", good, false); !errors.Is(err, ErrNoQuestion) {
 		t.Fatalf("second answer: %v", err)
 	}
 	// The clock resumes with what was left, so the run still times out eventually.
@@ -234,7 +256,7 @@ func TestQuestionExpires(t *testing.T) {
 	m, _ := newTestManager(Limits{RunTimeout: time.Minute, QuestionTimeout: 50 * time.Millisecond})
 	run, _ := m.Start(context.Background(), StartRequest{Principal: alice, Agent: agents.Manifest{ID: "a"}, Text: "hi"})
 	defer finish(m, run)
-	got := m.Ask(context.Background(), ipc.UserAskParams{RunID: run.ID, ToolCallID: "q1", Question: "Q?", Options: []string{"a", "b"}})
+	got := m.Ask(context.Background(), ipc.UserAskParams{RunID: run.ID, ToolCallID: "q1", Questions: twoQuestions})
 	if got.Status != "expired" || run.Waiting() {
 		t.Fatalf("result = %+v, waiting = %v", got, run.Waiting())
 	}

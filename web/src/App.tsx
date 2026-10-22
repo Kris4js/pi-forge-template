@@ -269,7 +269,7 @@ export function App() {
       }
     } else {
       if (event.type === "question") {
-        setQuestion({ toolCallId: event.toolCallId, question: event.question, options: event.options, expiresAt: event.expiresAt });
+        setQuestion({ toolCallId: event.toolCallId, questions: event.questions, expiresAt: event.expiresAt });
       } else if (event.type === "question_resolved") {
         setQuestion((q) => (q?.toolCallId === event.toolCallId ? undefined : q));
       }

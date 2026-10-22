@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"pi-forge/gateway/internal/agents"
+	"pi-forge/gateway/internal/ipc"
 	"pi-forge/gateway/internal/tenant"
 )
 
@@ -50,11 +51,12 @@ type Run struct {
 // question is an ask_user call waiting on the user.
 type question struct {
 	answers chan answer
+	asked   []ipc.AskQuestion
 	fields  map[string]any
 }
 
 type answer struct {
-	text    string
+	answers []ipc.AskAnswer
 	skipped bool
 	by      string
 }

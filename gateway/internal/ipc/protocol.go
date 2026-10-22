@@ -112,18 +112,32 @@ type ToolAuthorizeResult struct {
 	Reason   string `json:"reason,omitempty"`
 }
 
-// UserAskParams is an ask_user call: the runtime waits for the answer (or until it expires / the run ends).
-type UserAskParams struct {
-	RunID      string   `json:"runId"`
-	ToolCallID string   `json:"toolCallId"`
-	Question   string   `json:"question"`
-	Options    []string `json:"options"`
+// AskQuestion is one question of an ask_user call; several are shown as tabs.
+type AskQuestion struct {
+	// Header is the short tab label.
+	Header      string   `json:"header,omitempty"`
+	Question    string   `json:"question"`
+	Options     []string `json:"options"`
+	MultiSelect bool     `json:"multiSelect,omitempty"`
 }
 
-// UserAskResult: status answered | skipped | expired | cancelled; Answer is set when answered.
+// AskAnswer answers one question: chosen options (at most one unless multiSelect) and/or own words.
+type AskAnswer struct {
+	Selected []string `json:"selected,omitempty"`
+	Other    string   `json:"other,omitempty"`
+}
+
+// UserAskParams is an ask_user call: the runtime waits for the answers (or until they expire / the run ends).
+type UserAskParams struct {
+	RunID      string        `json:"runId"`
+	ToolCallID string        `json:"toolCallId"`
+	Questions  []AskQuestion `json:"questions"`
+}
+
+// UserAskResult: status answered | skipped | expired | cancelled; Answers (one per question) when answered.
 type UserAskResult struct {
-	Status string `json:"status"`
-	Answer string `json:"answer,omitempty"`
+	Status  string      `json:"status"`
+	Answers []AskAnswer `json:"answers,omitempty"`
 }
 
 // RunEventParams carries a runtime event verbatim; the gateway only peeks at its type.

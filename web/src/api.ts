@@ -52,8 +52,8 @@ export type RunEvent =
   | { type: "tool_end"; toolCallId: string; toolName: string; isError: boolean; result: string }
   | { type: "approval_required"; toolCallId: string; toolName: string; args: unknown; expiresAt: string }
   | { type: "approval_resolved"; toolCallId: string; decision: "allow" | "deny"; reason?: string; by?: string }
-  | { type: "question"; toolCallId: string; question: string; options: string[]; expiresAt: string }
-  | { type: "question_resolved"; toolCallId: string; status: "answered" | "skipped" | "expired" | "cancelled"; answer?: string; by?: string }
+  | { type: "question"; toolCallId: string; questions: AskQuestion[]; expiresAt: string }
+  | { type: "question_resolved"; toolCallId: string; status: "answered" | "skipped" | "expired" | "cancelled"; answers?: AskAnswer[]; by?: string }
   | { type: "message_end"; text: string; stopReason: string; error?: string }
   | { type: "compaction"; phase: "start" | "end" }
   | { type: "artifact_draft"; toolCallId: string; offset: number; delta: string }
@@ -61,7 +61,13 @@ export type RunEvent =
   | { type: "run_finished"; status: string; error?: string; usage?: Usage };
 
 /** A question an ask_user call is waiting on (GET /v1/sessions/:sid/run, or the `question` event). */
-export type PendingQuestion = { toolCallId: string; question: string; options: string[]; expiresAt: string };
+export type PendingQuestion = { toolCallId: string; questions: AskQuestion[]; expiresAt: string };
+
+/** One question of an ask_user call; several are shown as tabs. */
+export type AskQuestion = { header?: string; question: string; options: string[]; multiSelect?: boolean };
+
+/** The answer to one question: chosen options and/or the user's own words. */
+export type AskAnswer = { selected?: string[]; other?: string };
 
 /** The session's unfinished run, to reattach to after a reload. */
 export type SessionRun = { runId: string; agentId: string; next: number; questions: PendingQuestion[] };
@@ -134,7 +140,7 @@ export class Api {
   sessionRun(sessionId: string) {
     return this.request<SessionRun | undefined>("GET", `/v1/sessions/${sessionId}/run`);
   }
-  answer(runId: string, toolCallId: string, body: { answer: string } | { skip: true }) {
+  answer(runId: string, toolCallId: string, body: { answers: AskAnswer[] } | { skip: true }) {
     return this.request<void>("POST", `/v1/runs/${runId}/answers/${encodeURIComponent(toolCallId)}`, body);
   }
   decide(runId: string, toolCallId: string, decision: "approve" | "reject") {

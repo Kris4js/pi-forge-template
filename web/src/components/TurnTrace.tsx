@@ -243,15 +243,21 @@ function toolIcon(name: string) {
   return TOOL_ICONS.find(([pattern]) => pattern.test(name))?.[1] ?? <Wrench />;
 }
 
+/** "等待你的选择：…", then "Q → A" (one question) or "已回答 3 个问题" (tabs); details expand to the result. */
 function askTitle(tool: Tool) {
-  const question = (tool.args as { question?: unknown } | undefined)?.question;
-  const q = typeof question === "string" ? question : "";
-  if (tool.status === "waiting") return `等待你的选择：${q}`;
-  const answer = tool.question?.answer ?? tool.result?.match(/^用户的回答：([\s\S]*)$/)?.[1];
-  if (answer) return `${q} → ${answer}`;
-  if (tool.question?.status === "skipped" || tool.result?.includes("跳过")) return `${q} → 已跳过`;
-  if (tool.question?.status === "expired" || tool.result?.includes("没有回答")) return `${q} → 未回答`;
-  return `询问：${q}`;
+  const asked = (tool.args as { questions?: Array<{ question?: unknown }> } | undefined)?.questions ?? [];
+  const first = typeof asked[0]?.question === "string" ? asked[0].question : "";
+  const label = asked.length > 1 ? `${asked.length} 个问题` : first;
+  if (tool.status === "waiting") return `等待你的选择：${label}`;
+  const status = tool.question?.status ?? (tool.result?.includes("跳过") ? "skipped" : tool.result?.includes("没有回答") ? "expired" : tool.result?.startsWith("用户的回答") ? "answered" : "");
+  if (status === "skipped") return `${label} → 已跳过`;
+  if (status === "expired") return `${label} → 未回答`;
+  if (status === "answered") {
+    const a = tool.question?.answers?.[0];
+    const one = a ? [...(a.selected ?? []), ...(a.other ? [a.other] : [])].join("、") : tool.result?.match(/→ (.*)$/m)?.[1];
+    return asked.length > 1 ? `已回答 ${asked.length} 个问题` : `${first} → ${one ?? "已回答"}`;
+  }
+  return `询问：${label}`;
 }
 
 function toolTitle(tool: Tool) {

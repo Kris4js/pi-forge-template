@@ -133,22 +133,33 @@ test("tool calls are authorized by the gateway before execution", async () => {
   assert.equal(tickets, "");
 });
 
-test("ask_user is a default tool: it waits for the user's answer through the gateway and continues the run", async () => {
+test("ask_user is a default tool: tabbed, multi-select questions wait for the user's answers through the gateway", async () => {
   decide = () => ({ decision: "allow" });
   const asked: UserAskParams[] = [];
   answerQuestion = (p) => {
     asked.push(p);
-    return { status: "answered", answer: "继续排查（推荐）" };
+    return { status: "answered", answers: [{ selected: ["继续排查（推荐）"] }, { selected: ["短信", "邮件"], other: "工作日联系" }] };
   };
-  const ask = { question: "接下来你想怎么处理？", options: ["继续排查（推荐）", "直接建工单"] };
+  const ask = {
+    questions: [
+      { header: "处理方式", question: "接下来你想怎么处理？", options: ["继续排查（推荐）", "直接建工单"] },
+      { header: "通知渠道", question: "处理结果怎么通知你？", options: ["短信", "邮件", "电话", " 短信 "], multiSelect: true },
+    ],
+  };
   const result = await run("ask1", "support-desk", `!ask_user ${JSON.stringify(ask)}`);
   assert.equal(authorizeCalls.at(-1)?.toolName, "ask_user");
   assert.equal(asked.length, 1);
-  assert.deepEqual({ question: asked[0]!.question, options: asked[0]!.options }, ask);
   assert.equal(asked[0]!.runId, "ask1");
+  // Trimmed, de-duplicated, with multiSelect made explicit.
+  assert.deepEqual(asked[0]!.questions, [
+    { header: "处理方式", question: "接下来你想怎么处理？", options: ["继续排查（推荐）", "直接建工单"], multiSelect: false },
+    { header: "通知渠道", question: "处理结果怎么通知你？", options: ["短信", "邮件", "电话"], multiSelect: true },
+  ]);
   const end = result.events.find((e) => e.type === "tool_end");
-  assert.ok(end && end.type === "tool_end" && !end.isError && end.result.includes("继续排查（推荐）"));
-  // The run did not stop at the question: the model replied to the answer in the same run.
+  assert.ok(end && end.type === "tool_end" && !end.isError);
+  assert.match(end.result, /接下来你想怎么处理？ → 继续排查（推荐）/);
+  assert.match(end.result, /处理结果怎么通知你？（多选） → 短信；邮件；补充：工作日联系/);
+  // The run did not stop at the question: the model replied to the answers in the same run.
   assert.ok(result.events.some((e) => e.type === "text_delta"));
   const finish = result.events.at(-1);
   assert.ok(finish?.type === "run_finished" && finish.status === "completed");
@@ -159,10 +170,11 @@ test("ask_user is a default tool: it waits for the user's answer through the gat
   assert.ok(expiredEnd && expiredEnd.type === "tool_end" && expiredEnd.result.includes("没有回答"));
 
   // A default tool: agents get it without listing it (assistant's agent.json has no tools at all).
-  answerQuestion = () => ({ status: "answered", answer: "好" });
-  const viaDefault = await run("ask3", "assistant", `!ask_user ${JSON.stringify(ask)}`);
+  answerQuestion = () => ({ status: "answered", answers: [{ other: "好" }] });
+  const single = { questions: [{ header: "确认", question: "继续吗？", options: ["是", "否"] }] };
+  const viaDefault = await run("ask3", "assistant", `!ask_user ${JSON.stringify(single)}`);
   const defaultEnd = viaDefault.events.find((e) => e.type === "tool_end");
-  assert.ok(defaultEnd && defaultEnd.type === "tool_end" && !defaultEnd.isError && defaultEnd.result.includes("好"));
+  assert.ok(defaultEnd && defaultEnd.type === "tool_end" && !defaultEnd.isError && defaultEnd.result.includes("补充：好"));
 });
 
 test("file tools are sandboxed before reaching the gateway", async () => {

@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -375,11 +377,10 @@ func (m *Manager) Ask(ctx context.Context, params ipc.UserAskParams) ipc.UserAsk
 		return ipc.UserAskResult{Status: "cancelled"}
 	}
 	expires := time.Now().Add(m.limits.QuestionTimeout)
-	q := &question{answers: make(chan answer, 1), fields: map[string]any{
+	q := &question{answers: make(chan answer, 1), asked: params.Questions, fields: map[string]any{
 		"type":       "question",
 		"toolCallId": params.ToolCallID,
-		"question":   params.Question,
-		"options":    params.Options,
+		"questions":  params.Questions,
 		"expiresAt":  expires.UTC().Format(time.RFC3339),
 	}}
 	run.pauseDeadline()
@@ -395,7 +396,7 @@ func (m *Manager) Ask(ctx context.Context, params ipc.UserAskParams) ipc.UserAsk
 	select {
 	case got := <-q.answers:
 		by = got.by
-		result = ipc.UserAskResult{Status: "answered", Answer: got.text}
+		result = ipc.UserAskResult{Status: "answered", Answers: got.answers}
 		if got.skipped {
 			result = ipc.UserAskResult{Status: "skipped"}
 		}
@@ -409,25 +410,61 @@ func (m *Manager) Ask(ctx context.Context, params ipc.UserAskParams) ipc.UserAsk
 	run.mu.Unlock()
 	m.unpark(run)
 	run.resumeDeadline(m)
-	run.publish("question_resolved", map[string]any{"toolCallId": params.ToolCallID, "status": result.Status, "answer": result.Answer, "by": by})
+	run.publish("question_resolved", map[string]any{"toolCallId": params.ToolCallID, "status": result.Status, "answers": result.Answers, "by": by})
 	m.log.Info("audit: question resolved", "run", run.ID, "toolCall", params.ToolCallID, "status", result.Status, "by", by)
 	return result
 }
 
-// Answer resolves a pending question. An empty text with skip set tells the agent to decide itself.
-func (m *Manager) Answer(p auth.Principal, runID, toolCallID, text string, skip bool) error {
+// Answer resolves a pending ask_user call with one answer per question; skip lets the agent decide.
+// Answers that do not fit the questions are rejected and leave the call waiting.
+func (m *Manager) Answer(p auth.Principal, runID, toolCallID string, answers []ipc.AskAnswer, skip bool) error {
 	run, err := m.Get(p, runID)
 	if err != nil {
 		return err
 	}
 	run.mu.Lock()
+	defer run.mu.Unlock()
 	q := run.questions[toolCallID]
-	delete(run.questions, toolCallID)
-	run.mu.Unlock()
 	if q == nil {
 		return ErrNoQuestion
 	}
-	q.answers <- answer{text: text, skipped: skip, by: p.Tenant.UserID}
+	if !skip {
+		if err := checkAnswers(q.asked, answers); err != nil {
+			return err
+		}
+	} else {
+		answers = nil
+	}
+	delete(run.questions, toolCallID)
+	q.answers <- answer{answers: answers, skipped: skip, by: p.Tenant.UserID}
+	return nil
+}
+
+// ErrInvalidAnswer reports answers that do not match the questions asked.
+type ErrInvalidAnswer struct{ Reason string }
+
+func (e ErrInvalidAnswer) Error() string { return e.Reason }
+
+func checkAnswers(asked []ipc.AskQuestion, answers []ipc.AskAnswer) error {
+	if len(answers) != len(asked) {
+		return ErrInvalidAnswer{fmt.Sprintf("expected %d answers, got %d", len(asked), len(answers))}
+	}
+	for i, a := range answers {
+		q := asked[i]
+		if len(a.Selected) > 1 && !q.MultiSelect {
+			return ErrInvalidAnswer{fmt.Sprintf("question %d takes one choice", i+1)}
+		}
+		seen := map[string]bool{}
+		for _, s := range a.Selected {
+			if !slices.Contains(q.Options, s) || seen[s] {
+				return ErrInvalidAnswer{fmt.Sprintf("question %d: %q is not one of its options", i+1, s)}
+			}
+			seen[s] = true
+		}
+		if len(a.Selected) == 0 && strings.TrimSpace(a.Other) == "" {
+			return ErrInvalidAnswer{fmt.Sprintf("question %d has no answer", i+1)}
+		}
+	}
 	return nil
 }
 

@@ -120,9 +120,16 @@ export type ToolAuthorizeParams = {
 
 export type ToolAuthorizeResult = { decision: "allow" | "deny"; reason?: string };
 
-export type UserAskParams = { runId: string; toolCallId: string; question: string; options: string[] };
+/** One question of an ask_user call; several are shown as tabs. */
+export type AskQuestion = { header: string; question: string; options: string[]; multiSelect: boolean };
 
-export type UserAskResult = { status: "answered" | "skipped" | "expired" | "cancelled"; answer?: string };
+/** The answer to one question: chosen options (one unless multiSelect) and/or the user's own words. */
+export type AskAnswer = { selected?: string[]; other?: string };
+
+export type UserAskParams = { runId: string; toolCallId: string; questions: AskQuestion[] };
+
+/** answers has one entry per question when status is answered. */
+export type UserAskResult = { status: "answered" | "skipped" | "expired" | "cancelled"; answers?: AskAnswer[] };
 
 export type Usage = {
   inputTokens: number;
