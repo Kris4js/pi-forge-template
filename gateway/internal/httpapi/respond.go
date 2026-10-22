@@ -38,7 +38,7 @@ func (s *Server) writeErr(w http.ResponseWriter, err error) {
 		api = apiError{http.StatusTooManyRequests, "busy", err.Error()}
 	case errors.Is(err, runs.ErrSessionBusy):
 		api = apiError{http.StatusConflict, "session_busy", err.Error()}
-	case errors.Is(err, runs.ErrNotFound), errors.Is(err, runs.ErrNoApproval):
+	case errors.Is(err, runs.ErrNotFound), errors.Is(err, runs.ErrNoApproval), errors.Is(err, runs.ErrNoQuestion):
 		api = apiError{http.StatusNotFound, "not_found", err.Error()}
 	case errors.Is(err, ipc.ErrUnavailable):
 		api = apiError{http.StatusServiceUnavailable, "runtime_unavailable", err.Error()}

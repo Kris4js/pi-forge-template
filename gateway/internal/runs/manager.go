@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"sync"
 	"time"
 
@@ -25,6 +26,7 @@ var (
 	ErrNotFound    = errors.New("run not found")
 	ErrForbidden   = errors.New("run belongs to another tenant")
 	ErrNoApproval  = errors.New("no pending approval for this tool call")
+	ErrNoQuestion  = errors.New("no pending question for this tool call")
 )
 
 // Caller is the runtime connection (ipc.Supervisor).
@@ -37,6 +39,8 @@ type Limits struct {
 	MaxPerWorkspace int
 	RunTimeout      time.Duration
 	ApprovalTimeout time.Duration
+	// How long an ask_user question waits on the user before the agent proceeds on its own.
+	QuestionTimeout time.Duration
 	// How long finished runs stay readable (event replay, late approvals get a clear 404 after).
 	Retention time.Duration
 }
@@ -56,6 +60,9 @@ type Manager struct {
 func NewManager(rt Caller, limits Limits, log *slog.Logger) *Manager {
 	if limits.Retention == 0 {
 		limits.Retention = 5 * time.Minute
+	}
+	if limits.QuestionTimeout == 0 {
+		limits.QuestionTimeout = 24 * time.Hour
 	}
 	return &Manager{rt: rt, limits: limits, log: log, runs: map[string]*Run{}, sessions: map[string]string{}, perWorkspace: map[string]int{}}
 }
@@ -79,8 +86,11 @@ func (m *Manager) Start(ctx context.Context, req StartRequest) (*Run, error) {
 	}
 
 	timeout := req.Agent.Timeout(m.limits.RunTimeout)
-	run.ctx, run.cancel = context.WithTimeout(context.Background(), timeout)
-	go m.watchDeadline(run)
+	run.ctx, run.cancel = context.WithCancel(context.Background())
+	run.mu.Lock()
+	run.due = time.Now().Add(timeout)
+	run.deadline = time.AfterFunc(timeout, func() { m.deadlineExceeded(run) })
+	run.mu.Unlock()
 
 	callCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
@@ -97,6 +107,7 @@ func (m *Manager) Start(ctx context.Context, req StartRequest) (*Run, error) {
 	if err != nil {
 		m.release(run)
 		run.cancel()
+		run.stopDeadline()
 		return nil, err
 	}
 
@@ -140,11 +151,10 @@ func (m *Manager) release(run *Run) {
 		return
 	}
 	run.released = true
-	m.active--
-	m.perWorkspace[run.Tenant.Workspace]--
-	if m.perWorkspace[run.Tenant.Workspace] <= 0 {
-		delete(m.perWorkspace, run.Tenant.Workspace)
+	if !run.parked {
+		m.freeSlot(run)
 	}
+	run.parked = false
 	if run.SessionID != "" && m.sessions[sessionKey(run)] == run.ID {
 		delete(m.sessions, sessionKey(run))
 	}
@@ -160,9 +170,42 @@ func (m *Manager) release(run *Run) {
 	})
 }
 
-func (m *Manager) watchDeadline(run *Run) {
-	<-run.ctx.Done()
-	if !errors.Is(run.ctx.Err(), context.DeadlineExceeded) || run.isDone() {
+// freeSlot gives back the run's concurrency slot. Callers hold m.mu.
+func (m *Manager) freeSlot(run *Run) {
+	m.active--
+	m.perWorkspace[run.Tenant.Workspace]--
+	if m.perWorkspace[run.Tenant.Workspace] <= 0 {
+		delete(m.perWorkspace, run.Tenant.Workspace)
+	}
+}
+
+// park frees the concurrency slot of a run that waits on its user: a question may stay open for a
+// day, and an idle run must not keep everyone else out. The session stays reserved.
+func (m *Manager) park(run *Run) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if run.released || run.parked {
+		return
+	}
+	run.parked = true
+	m.freeSlot(run)
+}
+
+// unpark takes the slot back once the user answered. It may push the counts over the limit for a
+// moment; admission of new runs keeps checking the limit, so the excess drains as runs finish.
+func (m *Manager) unpark(run *Run) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if run.released || !run.parked {
+		return
+	}
+	run.parked = false
+	m.active++
+	m.perWorkspace[run.Tenant.Workspace]++
+}
+
+func (m *Manager) deadlineExceeded(run *Run) {
+	if run.isDone() {
 		return
 	}
 	run.mu.Lock()
@@ -170,6 +213,35 @@ func (m *Manager) watchDeadline(run *Run) {
 	run.mu.Unlock()
 	m.log.Warn("audit: run deadline exceeded", "run", run.ID)
 	m.cancelRuntime(run)
+}
+
+// pauseDeadline stops the run clock while the user thinks; resumeDeadline restarts it with whatever
+// was left. Nested questions (parallel calls) are counted by the questions map.
+func (r *Run) pauseDeadline() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.deadline != nil && r.deadline.Stop() {
+		r.remaining = max(time.Until(r.due), 0)
+	}
+}
+
+func (r *Run) resumeDeadline(m *Manager) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.done || len(r.questions) > 0 || r.remaining == 0 {
+		return
+	}
+	r.due = time.Now().Add(r.remaining)
+	r.deadline = time.AfterFunc(r.remaining, func() { m.deadlineExceeded(r) })
+	r.remaining = 0
+}
+
+func (r *Run) stopDeadline() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.deadline != nil {
+		r.deadline.Stop()
+	}
 }
 
 // Get returns a run the principal may access.
@@ -292,6 +364,89 @@ func (m *Manager) Authorize(ctx context.Context, params ipc.ToolAuthorizeParams)
 	return result
 }
 
+// Ask serves user.ask from the runtime: an ask_user call waits here until the user answers, skips,
+// the question expires (QuestionTimeout) or the run ends. The run clock is paused and the run's
+// concurrency slot freed meanwhile; the run itself, and the model's tool call, stay open.
+func (m *Manager) Ask(ctx context.Context, params ipc.UserAskParams) ipc.UserAskResult {
+	m.mu.Lock()
+	run := m.runs[params.RunID]
+	m.mu.Unlock()
+	if run == nil || run.isDone() {
+		return ipc.UserAskResult{Status: "cancelled"}
+	}
+	expires := time.Now().Add(m.limits.QuestionTimeout)
+	q := &question{answers: make(chan answer, 1), fields: map[string]any{
+		"type":       "question",
+		"toolCallId": params.ToolCallID,
+		"question":   params.Question,
+		"options":    params.Options,
+		"expiresAt":  expires.UTC().Format(time.RFC3339),
+	}}
+	run.pauseDeadline()
+	run.mu.Lock()
+	run.questions[params.ToolCallID] = q
+	run.mu.Unlock()
+	m.park(run)
+	run.publish("question", maps.Clone(q.fields))
+	m.log.Info("audit: question asked", "run", run.ID, "agent", run.AgentID, "toolCall", params.ToolCallID)
+
+	result := ipc.UserAskResult{Status: "cancelled"}
+	var by string
+	select {
+	case got := <-q.answers:
+		by = got.by
+		result = ipc.UserAskResult{Status: "answered", Answer: got.text}
+		if got.skipped {
+			result = ipc.UserAskResult{Status: "skipped"}
+		}
+	case <-time.After(m.limits.QuestionTimeout):
+		result.Status = "expired"
+	case <-run.ctx.Done():
+	case <-ctx.Done():
+	}
+	run.mu.Lock()
+	delete(run.questions, params.ToolCallID)
+	run.mu.Unlock()
+	m.unpark(run)
+	run.resumeDeadline(m)
+	run.publish("question_resolved", map[string]any{"toolCallId": params.ToolCallID, "status": result.Status, "answer": result.Answer, "by": by})
+	m.log.Info("audit: question resolved", "run", run.ID, "toolCall", params.ToolCallID, "status", result.Status, "by", by)
+	return result
+}
+
+// Answer resolves a pending question. An empty text with skip set tells the agent to decide itself.
+func (m *Manager) Answer(p auth.Principal, runID, toolCallID, text string, skip bool) error {
+	run, err := m.Get(p, runID)
+	if err != nil {
+		return err
+	}
+	run.mu.Lock()
+	q := run.questions[toolCallID]
+	delete(run.questions, toolCallID)
+	run.mu.Unlock()
+	if q == nil {
+		return ErrNoQuestion
+	}
+	q.answers <- answer{text: text, skipped: skip, by: p.Tenant.UserID}
+	return nil
+}
+
+// SessionRun returns the principal's unfinished run on a session, so a client that reloads or opens
+// the session elsewhere can reattach to it (and to a question it is waiting on).
+func (m *Manager) SessionRun(p auth.Principal, sessionID string) *Run {
+	if sessionID == "" {
+		return nil
+	}
+	m.mu.Lock()
+	id := m.sessions[fmt.Sprintf("%s/%s/%s", p.Tenant.Workspace, p.Tenant.UserID, sessionID)]
+	run := m.runs[id]
+	m.mu.Unlock()
+	if run == nil || run.isDone() || !p.SameTenant(run.Tenant) {
+		return nil
+	}
+	return run
+}
+
 // OnEvent ingests a runtime run.event notification.
 func (m *Manager) OnEvent(params ipc.RunEventParams) {
 	m.mu.Lock()
@@ -346,6 +501,7 @@ func (m *Manager) finish(run *Run, status, errMsg string, data json.RawMessage) 
 		return
 	}
 	run.cancel()
+	run.stopDeadline()
 	m.release(run)
 	m.log.Info("audit: run finished", "run", run.ID, "agent", run.AgentID, "workspace", run.Tenant.Workspace,
 		"user", run.Tenant.UserID, "status", status, "error", errMsg, "duration", time.Since(run.StartedAt).Round(time.Millisecond))

@@ -22,6 +22,7 @@ export const Methods = {
   artifactGet: "artifact.get",
   // runtime -> gateway
   toolAuthorize: "tool.authorize", // request: the gateway owns the allow/deny decision
+  userAsk: "user.ask", // request: an ask_user question; resolves when the user answers (or it expires)
   runEvent: "run.event", // notification
 } as const;
 
@@ -118,6 +119,10 @@ export type ToolAuthorizeParams = {
 };
 
 export type ToolAuthorizeResult = { decision: "allow" | "deny"; reason?: string };
+
+export type UserAskParams = { runId: string; toolCallId: string; question: string; options: string[] };
+
+export type UserAskResult = { status: "answered" | "skipped" | "expired" | "cancelled"; answer?: string };
 
 export type Usage = {
   inputTokens: number;

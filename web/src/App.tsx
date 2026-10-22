@@ -1,13 +1,14 @@
 import { AnimatePresence, motion, MotionConfig } from "framer-motion";
 import { AppWindow, ArrowDown, Monitor, Moon, PanelLeft, PanelRight, Sun, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { Api, type Agent, type ArtifactSummary, type Identity, type ImageModels, type ModelsResult, type SessionSummary } from "./api";
+import { Api, type Agent, type ArtifactSummary, type Identity, type ImageModels, type ModelsResult, type PendingQuestion, type RunEvent, type SessionSummary } from "./api";
 import { Composer, type ComposerHandle } from "./components/Composer";
 import { DetailsPanel } from "./components/DetailsPanel";
 import { PreviewLink, PreviewPanel } from "./components/PreviewPanel";
 import { MessageList } from "./components/MessageList";
 import { Sidebar, sessionTitle } from "./components/Sidebar";
 import { NewChat } from "./components/NewChat";
+import { AskUserCard, type AskUserAnswer } from "./components/AskUserCard";
 import { encodeAttachments } from "./lib/attachments";
 import { agentIcon } from "./lib/icons";
 import { applyEvent, fromTranscript, userItem, type Item } from "./conversation";
@@ -72,6 +73,8 @@ export function App() {
   const [items, setItems] = useState<Item[]>([]);
   const [busy, setBusy] = useState(false);
   const [runId, setRunId] = useState<string>();
+  // An ask_user question the current run waits on; it replaces the composer until answered.
+  const [question, setQuestion] = useState<PendingQuestion>();
   const [notice, setNotice] = useState<string>();
   const [mobileNav, setMobileNav] = useState(false);
   const [modal, setModal] = useState<{ kind: "settings" } | { kind: "delete"; session: SessionSummary }>();
@@ -165,13 +168,14 @@ export function App() {
   }, [refreshSessions, clearPreview]);
 
   const newChat = useCallback(() => {
-    if (busy) return;
+    if (busy && !question) return;
+    if (question) detach();
     setSessionId(undefined);
     setItems([]);
     clearPreview();
     setMobileNav(false);
     composer.current?.focus();
-  }, [busy, clearPreview]);
+  }, [busy, question, clearPreview]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ⌘K / Ctrl+K: new conversation.
   useEffect(() => {
@@ -185,8 +189,18 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [newChat]);
 
+  /** Leaves a run that waits on its user running in the gateway; only the local stream is dropped. */
+  function detach() {
+    abortRef.current?.abort();
+    abortRef.current = undefined;
+    setBusy(false);
+    setRunId(undefined);
+    setQuestion(undefined);
+  }
+
   async function openSession(id: string) {
-    if (busy) return;
+    if (busy && !question) return;
+    if (question) detach();
     setMobileNav(false);
     setSessionId(id);
     setLoadingSession(true);
@@ -200,6 +214,7 @@ export function App() {
       setDraft(null);
       setPanel((p) => (list.length ? "preview" : p === "preview" ? null : p));
       requestAnimationFrame(() => scroll.scrollToBottom(false));
+      void resume(id);
     } catch (e) {
       setNotice((e as Error).message);
     } finally {
@@ -234,6 +249,69 @@ export function App() {
     setModal(undefined);
   }
 
+  /** Folds one streamed event into the view; shared by fresh runs and reattached streams. */
+  function onRunEvent(event: RunEvent, ctx: { model?: string; startedAt?: number; session?: string; preview: { opened: boolean } }) {
+    if (event.type === "run") {
+      setRunId(event.runId);
+      setSessionId(event.sessionId);
+      ctx.session = event.sessionId;
+    } else if (event.type === "run_started") {
+      ctx.model = event.model;
+      setSessionId(event.sessionId);
+      ctx.session = event.sessionId;
+    } else if (event.type === "artifact_draft") {
+      setDraft((prev) => (event.offset === 0 ? event.delta : (prev ?? "").slice(0, event.offset) + event.delta));
+      // Open the preview once per run when the page starts streaming; a reader who closes it keeps it closed.
+      if (!ctx.preview.opened) {
+        ctx.preview.opened = true;
+        setPreviewRevision(null);
+        setPanel("preview");
+      }
+    } else {
+      if (event.type === "question") {
+        setQuestion({ toolCallId: event.toolCallId, question: event.question, options: event.options, expiresAt: event.expiresAt });
+      } else if (event.type === "question_resolved") {
+        setQuestion((q) => (q?.toolCallId === event.toolCallId ? undefined : q));
+      }
+      if (event.type === "artifact" && ctx.session) {
+        const sid = ctx.session;
+        api
+          .artifacts(sid)
+          .then((list) => {
+            setArtifacts(list);
+            setPreviewRevision(null);
+            setDraft(null);
+          })
+          .catch((e: Error) => setNotice(e.message));
+      }
+      setItems((prev) => applyEvent(prev, event, { now: Date.now(), model: ctx.model, runStartedAt: ctx.startedAt }));
+    }
+  }
+
+  /** Common lifecycle around a run's event stream (busy flag, abort, cleanup). */
+  async function streamRun(open: (signal: AbortSignal) => Promise<void>) {
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setBusy(true);
+    try {
+      await open(controller.signal);
+    } catch (e) {
+      if (!controller.signal.aborted) {
+        setNotice((e as Error).message);
+        throw e;
+      }
+    } finally {
+      if (abortRef.current === controller) {
+        abortRef.current = undefined;
+        setBusy(false);
+        setRunId(undefined);
+        setQuestion(undefined);
+        setDraft(null);
+        refreshSessions();
+      }
+    }
+  }
+
   async function send(text: string, files: File[] = [], onUploaded?: () => void) {
     if (!agentId || (!text.trim() && !files.length) || busy) return;
     const attachments = await encodeAttachments(files);
@@ -241,62 +319,50 @@ export function App() {
     setNotice(undefined);
     setItems((prev) => [...prev, userItem(text, fileAssets)]);
     requestAnimationFrame(() => scroll.scrollToBottom(true));
-    const controller = new AbortController();
-    abortRef.current = controller;
-    setBusy(true);
-    const startedAt = Date.now();
-    let runModel: string | undefined;
-    let runSession = sessionId;
-    let previewOpened = false;
-    try {
-      await api.run(
+    const ctx = { startedAt: Date.now(), session: sessionId, preview: { opened: false } } as Parameters<typeof onRunEvent>[1];
+    await streamRun((signal) =>
+      api.run(
         { agentId, sessionId, text, attachments, imageModel: agentId === "image-designer" ? imageModel || undefined : undefined, model: modelKey || undefined, thinkingLevel: effort || undefined },
         (event) => {
-          if (event.type === "run") {
-            onUploaded?.();
-            setRunId(event.runId);
-            setSessionId(event.sessionId);
-            runSession = event.sessionId;
-          } else if (event.type === "run_started") {
-            runModel = event.model;
-            setSessionId(event.sessionId);
-            runSession = event.sessionId;
-          } else if (event.type === "artifact_draft") {
-            setDraft((prev) => (event.offset === 0 ? event.delta : (prev ?? "").slice(0, event.offset) + event.delta));
-            // Open the preview once per run when the page starts streaming; a reader who closes it keeps it closed.
-            if (!previewOpened) {
-              previewOpened = true;
-              setPreviewRevision(null);
-              setPanel("preview");
-            }
-          } else {
-            if (event.type === "artifact" && runSession) {
-              const sid = runSession;
-              api
-                .artifacts(sid)
-                .then((list) => {
-                  setArtifacts(list);
-                  setPreviewRevision(null);
-                  setDraft(null);
-                })
-                .catch((e: Error) => setNotice(e.message));
-            }
-            setItems((prev) => applyEvent(prev, event, { now: Date.now(), model: runModel, runStartedAt: startedAt }));
-          }
+          if (event.type === "run") onUploaded?.();
+          onRunEvent(event, ctx);
         },
-        controller.signal,
-      );
+        signal,
+      ),
+    );
+  }
+
+  /**
+   * Reattaches to the session's unfinished run (it outlives a reload while it waits on a question):
+   * its events from `next` on fold into the transcript just loaded, and its question comes back.
+   */
+  async function resume(sid: string) {
+    const live = await api.sessionRun(sid).catch(() => undefined);
+    if (!live) return;
+    setRunId(live.runId);
+    setQuestion(live.questions[0]);
+    if (live.questions[0]) {
+      const waitingId = live.questions[0].toolCallId;
+      setItems((prev) => prev.map((i) => (i.kind === "tool" && i.id === waitingId ? { ...i, status: "waiting", result: undefined } : i)));
+    }
+    const ctx = { session: sid, preview: { opened: false } } as Parameters<typeof onRunEvent>[1];
+    await streamRun((signal) => api.events(live.runId, live.next, (event) => onRunEvent(event, ctx), signal)).catch(() => {});
+  }
+
+  async function answerQuestion(body: AskUserAnswer) {
+    if (!runId || !question) return;
+    try {
+      await api.answer(runId, question.toolCallId, body);
+      setQuestion(undefined);
+      requestAnimationFrame(() => {
+        composer.current?.focus();
+        scroll.scrollToBottom(true);
+      });
     } catch (e) {
-      if (!controller.signal.aborted) {
-        setNotice((e as Error).message);
-        throw e;
-      }
-    } finally {
-      abortRef.current = undefined;
-      setBusy(false);
-      setRunId(undefined);
-      setDraft(null);
-      refreshSessions();
+      const err = e as Error & { status?: number };
+      // 404: the question is gone (answered elsewhere, expired, run ended).
+      if (err.status === 404) setQuestion(undefined);
+      setNotice(err.status === 404 ? "这个问题已失效" : err.message);
     }
   }
 
@@ -368,7 +434,7 @@ export function App() {
       identity={identity}
       model={model}
       online={online}
-      busy={busy}
+      busy={busy && !question}
       runningSessionId={busy ? sessionId : undefined}
       onNew={newChat}
       onOpen={(id) => void openSession(id)}
@@ -529,7 +595,11 @@ export function App() {
                 <Button size="icon" aria-label="关闭提示" icon={<X size={14} />} onClick={() => setNotice(undefined)} />
               </div>
             )}
-            {!isNewChat && composerEl}
+            {question && !isNewChat ? (
+              <AskUserCard key={question.toolCallId} ask={question} agentName={agent?.name ?? "agent"} onAnswer={answerQuestion} />
+            ) : (
+              !isNewChat && composerEl
+            )}
           </div>
         </main>
 
@@ -596,16 +666,21 @@ export function App() {
         />
       )}
       {modal?.kind === "delete" && (
-        <Modal title="删除这段会话？" onClose={() => setModal(undefined)}>
+        <Modal title="删除聊天？" className="delete-chat-modal" onClose={() => setModal(undefined)}>
           <p className="modal-description">
-            「{sessionTitle(modal.session)}」的 pi 会话文件（{modal.session.messageCount} 条记录）将被永久删除，无法恢复。
+            <span className="delete-chat-target">
+              <span>这将永久删除“</span>
+              <span className="delete-chat-name" title={sessionTitle(modal.session)}>{sessionTitle(modal.session)}</span>
+              <span>”，</span>
+            </span>
+            <span className="delete-chat-warning">此操作无法撤销。</span>
           </p>
           <div className="modal-actions">
-            <Button variant="secondary" autoFocus onClick={() => setModal(undefined)}>
-              保留
+            <Button variant="outline" autoFocus onClick={() => setModal(undefined)}>
+              取消
             </Button>
             <Button variant="danger" onClick={() => void confirmDelete(modal.session)}>
-              确认删除
+              删除聊天
             </Button>
           </div>
         </Modal>

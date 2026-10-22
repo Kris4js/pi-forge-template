@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"time"
 )
@@ -43,6 +44,21 @@ type Manifest struct {
 		Tool     string `json:"tool"`
 		Argument string `json:"argument"`
 	} `json:"preview,omitempty"`
+}
+
+// DefaultTools are available to every agent without listing them in agent.json. The runtime adds the
+// same set (runtime/src/agents/manifest.ts). An agent opts out with policy.tools.<name> = "deny".
+var DefaultTools = []string{"ask_user"}
+
+// withDefaultTools appends the default tools the manifest does not list or deny.
+func withDefaultTools(m Manifest) Manifest {
+	for _, tool := range DefaultTools {
+		if m.Policy.Tools[tool] == Deny || slices.Contains(m.Tools, tool) {
+			continue
+		}
+		m.Tools = append(slices.Clone(m.Tools), tool)
+	}
+	return m
 }
 
 func (m Manifest) Timeout(fallback time.Duration) time.Duration {
@@ -87,6 +103,7 @@ func Load(dir string) (*Registry, error) {
 				return nil, fmt.Errorf("%s: tool %s has invalid decision %q", m.ID, tool, d)
 			}
 		}
+		m = withDefaultTools(m)
 		r.byID[m.ID] = m
 		r.order = append(r.order, m.ID)
 	}

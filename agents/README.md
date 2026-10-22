@@ -33,6 +33,16 @@ agents/<id>/
 }
 ```
 
+### 默认工具
+
+以下工具对所有 agent 默认开启，不用写进 `tools`：
+
+| 工具 | 作用 |
+| --- | --- |
+| `ask_user` | 向用户提一个选择题（2–6 个选项，可自由填写或跳过）并等待回答，最长 `FORGE_QUESTION_TIMEOUT_MS`（默认 24 小时）；等待期间暂停 run 计时、不占并发名额，刷新页面后可继续作答 |
+
+某个 agent 不需要时，在 `policy.tools` 里设为 `"deny"` 即可关闭（例如 `"ask_user": "deny"`）。
+
 ## tools.ts
 
 ```ts

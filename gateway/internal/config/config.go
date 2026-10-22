@@ -27,6 +27,7 @@ type Config struct {
 	MaxRunsPerWorkspace int
 	RunTimeout          time.Duration
 	ApprovalTimeout     time.Duration
+	QuestionTimeout     time.Duration
 
 	// RuntimeCommand starts the TS runtime; it speaks JSON-RPC on stdin/stdout.
 	RuntimeCommand []string
@@ -61,6 +62,7 @@ func Load() (Config, error) {
 		MaxRunsPerWorkspace: intEnv("FORGE_MAX_RUNS_PER_WORKSPACE", 4),
 		RunTimeout:          time.Duration(intEnv("FORGE_RUN_TIMEOUT_MS", 300_000)) * time.Millisecond,
 		ApprovalTimeout:     time.Duration(intEnv("FORGE_APPROVAL_TIMEOUT_MS", 120_000)) * time.Millisecond,
+		QuestionTimeout:     time.Duration(intEnv("FORGE_QUESTION_TIMEOUT_MS", 86_400_000)) * time.Millisecond,
 		RuntimeCommand:      strings.Fields(env("FORGE_RUNTIME_CMD", "node --import tsx runtime/src/main.ts")),
 	}
 	if c.KeysFile == "" && !c.DevAuth {

@@ -90,12 +90,25 @@ export async function loadAgent(agentsDir: string, id: string): Promise<AgentDef
   }
 
   return {
-    manifest,
+    manifest: withDefaultTools(manifest),
     dir,
     systemPrompt,
     skillsDir: existsSync(skillsDir) ? skillsDir : undefined,
     toolsFactory,
   };
+}
+
+/**
+ * Runtime tools every agent gets without listing them in agent.json; the gateway adds the same set
+ * (gateway/internal/agents/registry.go). An agent opts out with policy.tools.<name> = "deny".
+ */
+export const DEFAULT_TOOLS = ["ask_user"] as const;
+
+function withDefaultTools(manifest: AgentManifest): AgentManifest {
+  const listed = manifest.tools ?? [];
+  const decisions = (manifest.policy as { tools?: Record<string, unknown> } | undefined)?.tools ?? {};
+  const added = DEFAULT_TOOLS.filter((tool) => !listed.includes(tool) && decisions[tool] !== "deny");
+  return added.length ? { ...manifest, tools: [...listed, ...added] } : manifest;
 }
 
 /** Agent definitions are immutable for the lifetime of the process; restart the runtime to reload. */

@@ -52,11 +52,19 @@ export type RunEvent =
   | { type: "tool_end"; toolCallId: string; toolName: string; isError: boolean; result: string }
   | { type: "approval_required"; toolCallId: string; toolName: string; args: unknown; expiresAt: string }
   | { type: "approval_resolved"; toolCallId: string; decision: "allow" | "deny"; reason?: string; by?: string }
+  | { type: "question"; toolCallId: string; question: string; options: string[]; expiresAt: string }
+  | { type: "question_resolved"; toolCallId: string; status: "answered" | "skipped" | "expired" | "cancelled"; answer?: string; by?: string }
   | { type: "message_end"; text: string; stopReason: string; error?: string }
   | { type: "compaction"; phase: "start" | "end" }
   | { type: "artifact_draft"; toolCallId: string; offset: number; delta: string }
   | { type: "artifact"; toolCallId: string; revision: number; bytes: number }
   | { type: "run_finished"; status: string; error?: string; usage?: Usage };
+
+/** A question an ask_user call is waiting on (GET /v1/sessions/:sid/run, or the `question` event). */
+export type PendingQuestion = { toolCallId: string; question: string; options: string[]; expiresAt: string };
+
+/** The session's unfinished run, to reattach to after a reload. */
+export type SessionRun = { runId: string; agentId: string; next: number; questions: PendingQuestion[] };
 
 export class ApiError extends Error {
   constructor(
@@ -122,6 +130,13 @@ export class Api {
   cancel(runId: string) {
     return this.request<void>("POST", `/v1/runs/${runId}/cancel`);
   }
+  /** The session's unfinished run, or undefined (204) when there is none. */
+  sessionRun(sessionId: string) {
+    return this.request<SessionRun | undefined>("GET", `/v1/sessions/${sessionId}/run`);
+  }
+  answer(runId: string, toolCallId: string, body: { answer: string } | { skip: true }) {
+    return this.request<void>("POST", `/v1/runs/${runId}/answers/${encodeURIComponent(toolCallId)}`, body);
+  }
   decide(runId: string, toolCallId: string, decision: "approve" | "reject") {
     return this.request<void>("POST", `/v1/runs/${runId}/approvals/${encodeURIComponent(toolCallId)}`, { decision });
   }
@@ -133,25 +148,35 @@ export class Api {
     signal?: AbortSignal,
   ) {
     const res = await fetch("/v1/runs", { method: "POST", headers: this.headers(), body: JSON.stringify(body), signal });
-    if (!res.ok || !res.body) throw new ApiError(res.status, await errorMessage(res));
-    const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
-    let buffer = "";
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += value;
-      let index: number;
-      while ((index = buffer.indexOf("\n\n")) >= 0) {
-        const block = buffer.slice(0, index);
-        buffer = buffer.slice(index + 2);
-        let type = "";
-        let data = "";
-        for (const line of block.split("\n")) {
-          if (line.startsWith("event: ")) type = line.slice(7);
-          else if (line.startsWith("data: ")) data += line.slice(6);
-        }
-        if (type && data) onEvent({ ...JSON.parse(data), type } as RunEvent);
+    await readEvents(res, onEvent);
+  }
+
+  /** Reattaches to a running run's event stream from event `from` on (after a reload). */
+  async events(runId: string, from: number, onEvent: (e: RunEvent) => void, signal?: AbortSignal) {
+    const res = await fetch(`/v1/runs/${encodeURIComponent(runId)}/events?from=${from}`, { headers: this.headers(), signal });
+    await readEvents(res, onEvent);
+  }
+}
+
+async function readEvents(res: Response, onEvent: (e: RunEvent) => void) {
+  if (!res.ok || !res.body) throw new ApiError(res.status, await errorMessage(res));
+  const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buffer = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += value;
+    let index: number;
+    while ((index = buffer.indexOf("\n\n")) >= 0) {
+      const block = buffer.slice(0, index);
+      buffer = buffer.slice(index + 2);
+      let type = "";
+      let data = "";
+      for (const line of block.split("\n")) {
+        if (line.startsWith("event: ")) type = line.slice(7);
+        else if (line.startsWith("data: ")) data += line.slice(6);
       }
+      if (type && data) onEvent({ ...JSON.parse(data), type } as RunEvent);
     }
   }
 }

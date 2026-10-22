@@ -35,8 +35,28 @@ type Run struct {
 	status    string
 	toolCalls int
 	approvals map[string]chan approval
+	questions map[string]*question
 	timedOut  bool
 	released  bool
+	// parked: the run waits on the user and holds no concurrency slot (guarded by Manager.mu).
+	parked bool
+
+	// The run deadline pauses while a question waits on the user.
+	deadline  *time.Timer
+	due       time.Time
+	remaining time.Duration
+}
+
+// question is an ask_user call waiting on the user.
+type question struct {
+	answers chan answer
+	fields  map[string]any
+}
+
+type answer struct {
+	text    string
+	skipped bool
+	by      string
 }
 
 func newRun(id string, t tenant.Tenant, m agents.Manifest, sessionID string) *Run {
@@ -49,6 +69,7 @@ func newRun(id string, t tenant.Tenant, m agents.Manifest, sessionID string) *Ru
 		Manifest:  m,
 		changed:   make(chan struct{}),
 		approvals: map[string]chan approval{},
+		questions: map[string]*question{},
 	}
 }
 
@@ -62,6 +83,25 @@ func (r *Run) isDone() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.done
+}
+
+// Waiting reports whether the run is parked on a user question.
+func (r *Run) Waiting() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.questions) > 0
+}
+
+// Pending returns the next event sequence number and the questions still waiting on the user, so a
+// client that reattaches can show them and stream from there.
+func (r *Run) Pending() (int, []map[string]any) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]map[string]any, 0, len(r.questions))
+	for _, q := range r.questions {
+		out = append(out, q.fields)
+	}
+	return len(r.events), out
 }
 
 // publish appends a gateway-originated event.

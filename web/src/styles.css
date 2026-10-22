@@ -944,6 +944,166 @@ kbd {
   background: var(--cds-surface-3);
 }
 
+/* ---------- ask_user question card ---------- */
+
+.ask-user {
+  margin-top: 4px;
+  padding: 14px 20px 16px;
+  border-radius: 16px;
+  background: var(--cds-surface-3);
+  box-shadow: var(--cds-panel-shadow);
+  animation: ask-user-in 180ms var(--ease-out) both;
+}
+
+.ask-user > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 -8px 6px 0;
+}
+
+.ask-user h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--cds-text-primary);
+}
+
+.ask-user ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ask-user li {
+  border-bottom: 1px solid var(--cds-border-subtle);
+}
+
+.ask-user li button {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 48px;
+  padding: 8px 6px 8px 0;
+  text-align: left;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--cds-text-primary);
+  border-radius: 8px;
+  transition: background-color 120ms var(--ease-out);
+}
+
+.ask-user li button:hover {
+  background: var(--cds-fill-ghost-hover);
+}
+
+.ask-user-index {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--cds-text-secondary);
+  background: var(--cds-fill-ghost-hover);
+  transition:
+    background-color 120ms var(--ease-out),
+    color 120ms var(--ease-out);
+}
+
+.ask-user li button.picked {
+  font-weight: 500;
+}
+
+.ask-user li button.picked .ask-user-index {
+  color: var(--app-on-accent);
+  background: var(--app-action);
+}
+
+.ask-user > footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.ask-user-own {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  color: var(--cds-text-muted);
+}
+
+.ask-user-own svg {
+  flex-shrink: 0;
+  box-sizing: content-box;
+  padding: 4px;
+  border-radius: 50%;
+  background: var(--cds-fill-ghost-hover);
+}
+
+.ask-user-own input {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font-size: 14px;
+  color: var(--cds-text-primary);
+}
+
+.ask-user-own input::placeholder {
+  color: var(--cds-text-muted);
+}
+
+.ask-user > footer .btn {
+  min-height: 32px;
+  padding: 5px 16px;
+  border-radius: 999px;
+  font-size: 13.5px;
+}
+
+.ask-user > footer .btn.primary:disabled {
+  opacity: 1;
+  color: var(--app-on-accent);
+  background: var(--cds-text-muted);
+}
+
+@keyframes ask-user-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ask-user {
+    animation: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .ask-user {
+    padding: 12px 14px 14px;
+  }
+
+  .ask-user > footer {
+    flex-wrap: wrap;
+  }
+
+  .ask-user-own {
+    flex-basis: 100%;
+  }
+}
+
 /* ---------- turn footer ---------- */
 
 .turn-footer {
@@ -1338,6 +1498,73 @@ kbd {
   justify-content: flex-end;
   gap: 8px;
   margin-top: 22px;
+}
+
+.delete-chat-modal {
+  width: min(412px, calc(100% - 32px));
+  border-radius: 14px;
+}
+
+.delete-chat-modal .modal-body {
+  padding: 16px;
+}
+
+.delete-chat-modal .modal-body > header {
+  min-height: 24px;
+}
+
+.delete-chat-modal header .btn.icon {
+  width: 24px;
+  min-height: 24px;
+}
+
+.delete-chat-modal .modal-description {
+  display: flex;
+  flex-wrap: wrap;
+  margin: 4px 0 0;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.delete-chat-target {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.delete-chat-target > span:not(.delete-chat-name),
+.delete-chat-warning {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.delete-chat-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.delete-chat-modal .modal-actions {
+  margin-top: 12px;
+  gap: 12px;
+}
+
+.delete-chat-modal .modal-actions .btn {
+  min-height: 32px;
+  padding: 5px 16px;
+  border-radius: 999px;
+  font-size: 14px;
+}
+
+.delete-chat-modal .btn.danger {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.delete-chat-modal .btn.danger:hover:not(:disabled) {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 20%, var(--cds-surface-1));
 }
 
 .field-grid {

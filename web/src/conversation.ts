@@ -1,6 +1,6 @@
 import type { FileAsset, ImageAsset, RunEvent, TranscriptMessage, Usage } from "./api";
 
-export type ToolStatus = "running" | "pending" | "success" | "error" | "denied";
+export type ToolStatus = "running" | "pending" | "waiting" | "success" | "error" | "denied";
 
 export type Approval = { state: "pending" | "approved" | "rejected"; reason?: string; by?: string; expiresAt?: string };
 
@@ -26,6 +26,8 @@ export type Item =
       result?: string;
       status: ToolStatus;
       approval?: Approval;
+      /** ask_user: how the user answered (live runs; reloads read it from the tool result). */
+      question?: { status: string; answer?: string };
       /** Artifact revision this call published. */
       artifactRevision?: number;
       images?: ImageAsset[];
@@ -106,6 +108,10 @@ export function applyEvent(items: Item[], e: RunEvent, ctx: { now: number; model
           ? { status: "running", approval: { state: "approved", by: e.by } }
           : { status: "denied", approval: { state: "rejected", reason: e.reason, by: e.by } },
       );
+    case "question":
+      return updateTool(e.toolCallId, () => ({ status: "waiting" }));
+    case "question_resolved":
+      return updateTool(e.toolCallId, () => ({ status: "running", question: { status: e.status, answer: e.answer } }));
     case "tool_end":
       return updateTool(e.toolCallId, (t) => ({
         result: e.result,

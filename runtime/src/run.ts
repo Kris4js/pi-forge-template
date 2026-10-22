@@ -7,6 +7,7 @@ import {
   type AgentSession,
   type AgentSessionEvent,
 } from "@earendil-works/pi-coding-agent";
+import { ASK_USER, askUserTool } from "./agents/ask-user.ts";
 import type { AgentCatalog, AgentManifest } from "./agents/manifest.ts";
 import { generateImages, imageConfig } from "./model/images.ts";
 import { getImageAsset, IMAGE_ENTRY } from "./image-assets.ts";
@@ -25,6 +26,8 @@ import {
   type RunStartResult,
   type RunStatus,
   type Usage,
+  type UserAskParams,
+  type UserAskResult,
 } from "./protocol.ts";
 import { assertScope, tenantPaths } from "./tenant.ts";
 
@@ -172,7 +175,15 @@ export class Runner {
           return (await saveAttachments(paths.userHome, files, sessionManager.getSessionId())).assets;
         },
         artifacts: ArtifactStore.forSession(paths, sessionManager.getSessionId()),
-      });
+      }) ?? [];
+      // Built-in runtime tools are opted into per agent through the manifest allowlist.
+      if (agent.manifest.tools?.includes(ASK_USER)) {
+        customTools.push(
+          askUserTool((toolCallId, question, options, signal) =>
+            this.deps.peer.request<UserAskResult>(Methods.userAsk, { runId, toolCallId, question, options } satisfies UserAskParams, signal),
+          ),
+        );
+      }
       ({ session } = await createAgentSession({
         cwd: paths.userHome,
         agentDir: paths.userHome,

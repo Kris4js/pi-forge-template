@@ -163,3 +163,79 @@ func TestAttachmentsForwardedToRuntime(t *testing.T) {
 		t.Fatal("attachments not forwarded")
 	}
 }
+
+func TestQuestionWaitsOnTheUser(t *testing.T) {
+	m, _ := newTestManager(Limits{MaxConcurrent: 1, RunTimeout: 150 * time.Millisecond, QuestionTimeout: time.Minute})
+	agent := agents.Manifest{ID: "a"}
+	run, err := m.Start(context.Background(), StartRequest{Principal: alice, Agent: agent, SessionID: "s1", Text: "hi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := make(chan ipc.UserAskResult)
+	go func() {
+		result <- m.Ask(context.Background(), ipc.UserAskParams{RunID: run.ID, ToolCallID: "q1", Question: "Q?", Options: []string{"a", "b"}})
+	}()
+	events, _, _ := run.Next(context.Background(), 0)
+	if events[0].Type != "question" || !run.Waiting() {
+		t.Fatalf("first event = %s, waiting = %v", events[0].Type, run.Waiting())
+	}
+	// The run clock is paused: waiting past the run timeout does not time the run out.
+	time.Sleep(300 * time.Millisecond)
+	if run.isDone() {
+		t.Fatal("run timed out while the user was answering")
+	}
+	// The waiting run frees its slot (another session may start) but keeps its own session.
+	other, err := m.Start(context.Background(), StartRequest{Principal: alice, Agent: agent, Text: "hi"})
+	if err != nil {
+		t.Fatalf("a parked run must not hold the concurrency slot: %v", err)
+	}
+	finish(m, other)
+	if _, err := m.Start(context.Background(), StartRequest{Principal: alice, Agent: agent, SessionID: "s1", Text: "hi"}); !errors.Is(err, ErrSessionBusy) {
+		t.Fatalf("session must stay reserved, got %v", err)
+	}
+	if got := m.SessionRun(alice, "s1"); got != run {
+		t.Fatal("session run lookup failed")
+	}
+	if _, qs := run.Pending(); len(qs) != 1 || qs[0]["question"] != "Q?" {
+		t.Fatalf("pending questions = %v", qs)
+	}
+	bob := auth.Principal{Tenant: tenant.Tenant{Workspace: "acme", UserID: "bob"}}
+	if err := m.Answer(bob, run.ID, "q1", "a", false); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("another user must not answer: %v", err)
+	}
+	if err := m.Answer(alice, run.ID, "q1", "a", false); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-result; got.Status != "answered" || got.Answer != "a" {
+		t.Fatalf("result = %+v", got)
+	}
+	if err := m.Answer(alice, run.ID, "q1", "a", false); !errors.Is(err, ErrNoQuestion) {
+		t.Fatalf("second answer: %v", err)
+	}
+	// The clock resumes with what was left, so the run still times out eventually.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	for from := 0; ; {
+		evs, done, err := run.Next(ctx, from)
+		if err != nil {
+			t.Fatal(err)
+		}
+		from += len(evs)
+		if done {
+			break
+		}
+	}
+	if run.Status() != "timeout" {
+		t.Fatalf("status = %s, want timeout after the answer", run.Status())
+	}
+}
+
+func TestQuestionExpires(t *testing.T) {
+	m, _ := newTestManager(Limits{RunTimeout: time.Minute, QuestionTimeout: 50 * time.Millisecond})
+	run, _ := m.Start(context.Background(), StartRequest{Principal: alice, Agent: agents.Manifest{ID: "a"}, Text: "hi"})
+	defer finish(m, run)
+	got := m.Ask(context.Background(), ipc.UserAskParams{RunID: run.ID, ToolCallID: "q1", Question: "Q?", Options: []string{"a", "b"}})
+	if got.Status != "expired" || run.Waiting() {
+		t.Fatalf("result = %+v, waiting = %v", got, run.Waiting())
+	}
+}

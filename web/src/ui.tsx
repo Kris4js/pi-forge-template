@@ -43,7 +43,7 @@ export function CopyButton({ text, label = "复制", compact }: { text: string; 
   );
 }
 
-export function Modal({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
+export function Modal({ title, children, onClose, className = "" }: { title: string; children: ReactNode; onClose: () => void; className?: string }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
@@ -57,7 +57,7 @@ export function Modal({ title, children, onClose }: { title: string; children: R
   return (
     <dialog
       ref={ref}
-      className="modal"
+      className={`modal ${className}`}
       aria-labelledby="modal-title"
       onCancel={(e) => {
         e.preventDefault();

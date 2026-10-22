@@ -15,6 +15,8 @@ import type {
   SessionDetail,
   SessionSummary,
   ToolAuthorizeParams,
+  UserAskParams,
+  UserAskResult,
 } from "../src/protocol.ts";
 
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
@@ -30,6 +32,7 @@ const finished = new Map<string, () => void>();
 const authorizeCalls: ToolAuthorizeParams[] = [];
 type Decision = { decision: "allow" | "deny"; reason?: string };
 let decide: (p: ToolAuthorizeParams) => Decision | Promise<Decision> = () => ({ decision: "allow" });
+let answerQuestion: (p: UserAskParams) => UserAskResult = () => ({ status: "skipped" });
 
 before(async () => {
   dataDir = await mkdtemp(join(tmpdir(), "pi-forge-test-"));
@@ -60,6 +63,7 @@ before(async () => {
     events.set(p.runId, list);
     if (p.event.type === "run_finished") finished.get(p.runId)?.();
   });
+  peer.handle("user.ask", (p: UserAskParams) => answerQuestion(p));
   peer.handle("tool.authorize", (p: ToolAuthorizeParams) => {
     authorizeCalls.push(p);
     return decide(p);
@@ -127,6 +131,38 @@ test("tool calls are authorized by the gateway before execution", async () => {
     () => "",
   );
   assert.equal(tickets, "");
+});
+
+test("ask_user is a default tool: it waits for the user's answer through the gateway and continues the run", async () => {
+  decide = () => ({ decision: "allow" });
+  const asked: UserAskParams[] = [];
+  answerQuestion = (p) => {
+    asked.push(p);
+    return { status: "answered", answer: "继续排查（推荐）" };
+  };
+  const ask = { question: "接下来你想怎么处理？", options: ["继续排查（推荐）", "直接建工单"] };
+  const result = await run("ask1", "support-desk", `!ask_user ${JSON.stringify(ask)}`);
+  assert.equal(authorizeCalls.at(-1)?.toolName, "ask_user");
+  assert.equal(asked.length, 1);
+  assert.deepEqual({ question: asked[0]!.question, options: asked[0]!.options }, ask);
+  assert.equal(asked[0]!.runId, "ask1");
+  const end = result.events.find((e) => e.type === "tool_end");
+  assert.ok(end && end.type === "tool_end" && !end.isError && end.result.includes("继续排查（推荐）"));
+  // The run did not stop at the question: the model replied to the answer in the same run.
+  assert.ok(result.events.some((e) => e.type === "text_delta"));
+  const finish = result.events.at(-1);
+  assert.ok(finish?.type === "run_finished" && finish.status === "completed");
+
+  answerQuestion = () => ({ status: "expired" });
+  const expired = await run("ask2", "support-desk", `!ask_user ${JSON.stringify(ask)}`);
+  const expiredEnd = expired.events.find((e) => e.type === "tool_end");
+  assert.ok(expiredEnd && expiredEnd.type === "tool_end" && expiredEnd.result.includes("没有回答"));
+
+  // A default tool: agents get it without listing it (assistant's agent.json has no tools at all).
+  answerQuestion = () => ({ status: "answered", answer: "好" });
+  const viaDefault = await run("ask3", "assistant", `!ask_user ${JSON.stringify(ask)}`);
+  const defaultEnd = viaDefault.events.find((e) => e.type === "tool_end");
+  assert.ok(defaultEnd && defaultEnd.type === "tool_end" && !defaultEnd.isError && defaultEnd.result.includes("好"));
 });
 
 test("file tools are sandboxed before reaching the gateway", async () => {

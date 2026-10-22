@@ -5,6 +5,7 @@ import {
   Database,
   FileText,
   Layers,
+  MessageCircleQuestion,
   Search,
   ShieldAlert,
   ShieldCheck,
@@ -17,6 +18,7 @@ import {
 import { Fragment, useContext, useEffect, useState, type ReactNode } from "react";
 import type { Item } from "../conversation";
 import { Button, formatDuration } from "../ui";
+import { ASK_USER } from "./AskUserCard";
 import { CodeView, guessLanguage } from "./CodeView";
 import { Markdown } from "./Markdown";
 import { PreviewLink } from "./PreviewPanel";
@@ -66,6 +68,7 @@ export function TurnTrace({ body, live, startedAt, durationMs, finalStatus, onDe
 
   const tools = process.filter((s): s is Extract<Segment, { kind: "tool" }> => s.kind === "tool").map((s) => s.item);
   const pending = tools.find((t) => t.status === "pending");
+  const waiting = tools.find((t) => t.status === "waiting");
   const failed = tools.filter((t) => t.status === "error" || t.status === "denied").length;
   const last = segments.at(-1);
   const continuing = live && (!last || (last.kind === "tool" && last.item.status === "success") || last.kind === "compaction");
@@ -86,10 +89,12 @@ export function TurnTrace({ body, live, startedAt, durationMs, finalStatus, onDe
     return <Answer segments={answer} live={live} />;
   }
 
-  const status = pending ? "approval" : live ? "running" : failed || finalStatus === "failed" || finalStatus === "timeout" ? "error" : undefined;
+  const status = pending || waiting ? "approval" : live ? "running" : failed || finalStatus === "failed" || finalStatus === "timeout" ? "error" : undefined;
   const title = pending
     ? `等待审批：${pending.name}`
-    : live
+    : waiting
+      ? "等待你的选择"
+      : live
       ? "正在处理"
       : summaryTitle(finalStatus, tools.length, failed, process.some((s) => s.kind === "thinking"));
 
@@ -230,13 +235,26 @@ const TOOL_ICONS: Array<[RegExp, ReactNode]> = [
   [/search|kb|lookup/, <Search key="s" />],
   [/query|sql|sales|metric/, <Database key="d" />],
   [/ticket/, <Ticket key="k" />],
+  [/^ask_user$/, <MessageCircleQuestion key="q" />],
 ];
 
 function toolIcon(name: string) {
   return TOOL_ICONS.find(([pattern]) => pattern.test(name))?.[1] ?? <Wrench />;
 }
 
+function askTitle(tool: Tool) {
+  const question = (tool.args as { question?: unknown } | undefined)?.question;
+  const q = typeof question === "string" ? question : "";
+  if (tool.status === "waiting") return `等待你的选择：${q}`;
+  const answer = tool.question?.answer ?? tool.result?.match(/^用户的回答：([\s\S]*)$/)?.[1];
+  if (answer) return `${q} → ${answer}`;
+  if (tool.question?.status === "skipped" || tool.result?.includes("跳过")) return `${q} → 已跳过`;
+  if (tool.question?.status === "expired" || tool.result?.includes("没有回答")) return `${q} → 未回答`;
+  return `询问：${q}`;
+}
+
 function toolTitle(tool: Tool) {
+  if (tool.name === ASK_USER) return askTitle(tool);
   switch (tool.status) {
     case "running":
       return `正在调用 ${tool.name}`;
@@ -255,9 +273,10 @@ function toolTitle(tool: Tool) {
 function ToolStep({ tool, onDecide }: { tool: Tool; onDecide?: Decide }) {
   const [open, setOpen] = useState<boolean>();
   const pending = tool.status === "pending";
-  const status = tool.status === "running" ? "running" : pending ? "approval" : tool.status === "success" ? undefined : "error";
+  const status =
+    tool.status === "running" ? "running" : pending || tool.status === "waiting" ? "approval" : tool.status === "success" ? undefined : "error";
   const args = JSON.stringify(tool.args ?? {}, null, 2);
-  const summary = argSummary(tool.args);
+  const summary = tool.name === ASK_USER ? "" : argSummary(tool.args);
   const htmlArg = (tool.args as { html?: unknown } | undefined)?.html;
   const openPreview = useContext(PreviewLink);
   const revision = tool.artifactRevision;

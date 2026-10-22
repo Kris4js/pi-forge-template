@@ -62,6 +62,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/runs/{run}/events", s.authed(s.runEvents))
 	mux.Handle("POST /v1/runs/{run}/cancel", s.authed(s.cancelRun))
 	mux.Handle("POST /v1/runs/{run}/approvals/{toolCall}", s.authed(s.decide))
+	mux.Handle("POST /v1/runs/{run}/answers/{toolCall}", s.authed(s.answer))
+	mux.Handle("GET /v1/sessions/{session}/run", s.authed(s.sessionRun))
 	if s.WebDir != "" {
 		mux.Handle("GET /", spa(s.WebDir))
 	}
@@ -352,8 +354,14 @@ func (s *Server) startRun(w http.ResponseWriter, r *http.Request, p auth.Princip
 	if body.Stream != nil && !*body.Stream {
 		return s.waitRun(w, r, run)
 	}
-	// A client that walks away from the stream walks away from the run.
-	return s.streamRun(w, r, run, 0, func() { _ = s.Runs.Cancel(p, run.ID) })
+	// A client that walks away from the stream walks away from the run, unless the run waits on the
+	// user's answer: that wait outlives a reload or a closed tab, and the client reattaches through
+	// GET /v1/sessions/{session}/run.
+	return s.streamRun(w, r, run, 0, func() {
+		if !run.Waiting() {
+			_ = s.Runs.Cancel(p, run.ID)
+		}
+	})
 }
 
 func (s *Server) runEvents(w http.ResponseWriter, r *http.Request, p auth.Principal) error {
@@ -482,6 +490,35 @@ func (s *Server) decide(w http.ResponseWriter, r *http.Request, p auth.Principal
 		return err
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	return nil
+}
+
+// answer resolves an ask_user question: {"answer": "..."} or {"skip": true}.
+func (s *Server) answer(w http.ResponseWriter, r *http.Request, p auth.Principal) error {
+	var body struct {
+		Answer string `json:"answer"`
+		Skip   bool   `json:"skip"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || (!body.Skip && strings.TrimSpace(body.Answer) == "") || len(body.Answer) > 4000 {
+		return apiError{http.StatusBadRequest, "invalid_answer", `body must set "answer" (1..4000 characters) or "skip": true`}
+	}
+	if err := s.Runs.Answer(p, r.PathValue("run"), r.PathValue("toolCall"), strings.TrimSpace(body.Answer), body.Skip); err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	return nil
+}
+
+// sessionRun reports the session's unfinished run (204 when there is none): its id, the event
+// sequence to stream from, and any questions waiting on the user. The console uses it to reattach.
+func (s *Server) sessionRun(w http.ResponseWriter, r *http.Request, p auth.Principal) error {
+	run := s.Runs.SessionRun(p, r.PathValue("session"))
+	if run == nil {
+		w.WriteHeader(http.StatusNoContent)
+		return nil
+	}
+	next, questions := run.Pending()
+	writeJSON(w, http.StatusOK, map[string]any{"runId": run.ID, "agentId": run.AgentID, "next": next, "questions": questions})
 	return nil
 }
 

@@ -62,6 +62,13 @@ func run(log *slog.Logger) error {
 				}
 				return manager.Authorize(ctx, params), nil
 			},
+			ipc.MethodUserAsk: func(ctx context.Context, raw json.RawMessage) (any, error) {
+				var params ipc.UserAskParams
+				if err := json.Unmarshal(raw, &params); err != nil {
+					return nil, err
+				}
+				return manager.Ask(ctx, params), nil
+			},
 		},
 		Notifies: map[string]ipc.NotifyHandler{
 			ipc.MethodRunEvent: func(raw json.RawMessage) {
@@ -78,6 +85,7 @@ func run(log *slog.Logger) error {
 		MaxPerWorkspace: cfg.MaxRunsPerWorkspace,
 		RunTimeout:      cfg.RunTimeout,
 		ApprovalTimeout: cfg.ApprovalTimeout,
+		QuestionTimeout: cfg.QuestionTimeout,
 	}, log)
 
 	supervised := make(chan struct{})

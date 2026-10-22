@@ -23,6 +23,7 @@ const (
 	MethodArtifactList  = "artifact.list"
 	MethodArtifactGet   = "artifact.get"
 	MethodToolAuthorize = "tool.authorize"
+	MethodUserAsk       = "user.ask"
 	MethodRunEvent      = "run.event"
 )
 
@@ -109,6 +110,20 @@ type ToolAuthorizeParams struct {
 type ToolAuthorizeResult struct {
 	Decision string `json:"decision"` // allow | deny
 	Reason   string `json:"reason,omitempty"`
+}
+
+// UserAskParams is an ask_user call: the runtime waits for the answer (or until it expires / the run ends).
+type UserAskParams struct {
+	RunID      string   `json:"runId"`
+	ToolCallID string   `json:"toolCallId"`
+	Question   string   `json:"question"`
+	Options    []string `json:"options"`
+}
+
+// UserAskResult: status answered | skipped | expired | cancelled; Answer is set when answered.
+type UserAskResult struct {
+	Status string `json:"status"`
+	Answer string `json:"answer,omitempty"`
 }
 
 // RunEventParams carries a runtime event verbatim; the gateway only peeks at its type.
