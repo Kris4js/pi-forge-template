@@ -29,7 +29,7 @@ export type ImageAsset = { id: string; name: string; mimeType: string };
 export type FileAsset = { name: string; mimeType: string; size?: number };
 export type TranscriptMessage =
   | { role: "user"; text: string; timestamp?: number; images?: ImageAsset[]; files?: FileAsset[] }
-  | { role: "assistant"; text: string; thinking?: string; toolCalls?: { id: string; name: string; args: unknown }[]; error?: string }
+  | { role: "assistant"; text: string; thinking?: string; toolCalls?: { id: string; name: string; args: unknown }[]; error?: string; timestamp?: number }
   | { role: "tool"; toolCallId: string; toolName: string; text: string; isError: boolean; artifactRevision?: number; images?: ImageAsset[] }
   | { role: "summary"; text: string };
 

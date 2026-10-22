@@ -461,10 +461,10 @@ kbd {
 .avatar {
   display: grid;
   place-items: center;
-  width: 32px;
-  height: 32px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 600;
   color: var(--app-on-accent);
   background: linear-gradient(145deg, #8a8578, #5c5850);
@@ -543,22 +543,6 @@ kbd {
   align-items: center;
   gap: 4px;
   flex-shrink: 0;
-}
-
-.model-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  margin-right: 6px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  font-size: 11px;
-  color: var(--cds-text-secondary);
-  box-shadow: inset 0 0 0 1px var(--cds-border);
-}
-
-.model-badge.offline {
-  color: var(--danger);
 }
 
 .scroll-area {
@@ -1121,39 +1105,6 @@ kbd {
   margin-left: -9px;
 }
 
-.turn-meta {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 12px;
-  font-size: 11px;
-  color: var(--cds-text-muted);
-}
-
-.turn-meta > span {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.status-pill {
-  padding: 1px 8px;
-  border-radius: 999px;
-  background: var(--ok-soft);
-  color: var(--ok);
-}
-
-.status-pill.failed,
-.status-pill.timeout {
-  background: var(--danger-soft);
-  color: var(--danger);
-}
-
-.status-pill.cancelled {
-  background: var(--cds-fill-secondary);
-  color: var(--cds-text-secondary);
-}
-
 .turn-error {
   width: 100%;
   padding: 6px 10px;
@@ -1693,10 +1644,6 @@ kbd {
     gap: 8px;
   }
 
-  .model-badge .mono {
-    display: none;
-  }
-
   .top-sep,
   .top-session {
     display: none;
@@ -1819,6 +1766,18 @@ kbd {
 .new-chat-below {
   margin-top: var(--new-chat-composer-gap);
   padding: 0 14px;
+}
+
+.agent-chips,
+.starter-card {
+  animation: new-chat-reveal 160ms var(--ease-out) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-chips,
+  .starter-card {
+    animation: none;
+  }
 }
 
 .agent-chips {
@@ -2014,25 +1973,81 @@ kbd {
   min-height: 30px;
 }
 
-.preview-version {
+/* Version picker: a quiet text trigger like the toolbar's icon buttons, not a form field. */
+.version-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   height: 30px;
-  max-width: 200px;
-  padding: 0 8px;
-  border: 0;
+  max-width: 220px;
+  padding: 0 6px 0 8px;
   border-radius: 8px;
-  font-size: 12.5px;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
   color: var(--cds-text-primary);
+  transition: background-color 120ms var(--ease-out);
+}
+
+.version-trigger:not(.static):hover,
+.version-trigger[data-popup-open] {
   background: var(--cds-fill-ghost-hover);
 }
 
-span.preview-version {
-  display: inline-flex;
-  align-items: center;
+.version-trigger:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--cds-clay);
 }
 
-.preview-version.muted {
+.version-trigger.static {
+  cursor: default;
+}
+
+.version-trigger.muted {
+  font-weight: 400;
   color: var(--cds-text-muted);
-  background: transparent;
+}
+
+.version-trigger .chevron-icon {
+  width: 14px;
+  height: 14px;
+  color: var(--cds-text-muted);
+}
+
+.version-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.version-latest {
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  color: var(--cds-clay);
+  background: color-mix(in srgb, var(--cds-clay) 14%, transparent);
+}
+
+.version-menu {
+  min-width: 188px;
+}
+
+.version-menu .dropdown-menu-item {
+  gap: 12px;
+}
+
+.version-name {
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+.version-meta {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--cds-text-muted);
 }
 
 .preview-live {
@@ -2209,15 +2224,6 @@ span.preview-version {
 }
 
 @container main (max-width: 540px) {
-  .model-badge .mono {
-    display: none;
-  }
-
-  .model-badge {
-    padding: 6px;
-    margin-right: 2px;
-  }
-
   .composer .model-label {
     max-width: 150px;
   }
@@ -2458,11 +2464,6 @@ span.preview-version {
   background: var(--cds-border-subtle);
 }
 
-.preview-toolbar .select-trigger.preview-version {
-  max-width: 220px;
-  height: 30px;
-}
-
 /* Attachment controls stay inside the existing composer. */
 .attachment-add {
   display: grid;
@@ -2568,4 +2569,12 @@ span.preview-version {
 @media (max-width: 640px) {
   .image-carousel { --carousel-tile: 112px; }
   .image-lightbox { inset: 12px; }
+}
+
+/* Top level: browsers drop @keyframes nested inside a rule. */
+@keyframes new-chat-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
 }

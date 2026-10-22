@@ -65,7 +65,7 @@ export function Sidebar(props: Props) {
     );
   }, [sessions, query, agentFilter]);
 
-  const initials = (identity.userId || "?").slice(0, 2).toUpperCase();
+  const initial = (identity.userId || "?").charAt(0).toUpperCase();
 
   return (
     <div className="sidebar-inner">
@@ -191,7 +191,7 @@ export function Sidebar(props: Props) {
 
       <div className="sidebar-bottom">
         <button className="profile" onClick={props.onSettings} title="身份与偏好设置">
-          <span className="avatar">{initials}</span>
+          <span className="avatar">{initial}</span>
           <span className="profile-text">{identity.userId || "anonymous"}</span>
           <span className="profile-status" title={props.online ? `runtime 在线 · ${props.model ?? ""}` : "无法连接 gateway"}>
             <LiveDot tone={props.online ? "ok" : "danger"} />

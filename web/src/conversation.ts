@@ -14,6 +14,8 @@ export type Item =
       error?: string;
       /** Still receiving deltas. */
       open: boolean;
+      /** When the message finished (stored sessions); a reloaded turn's duration is derived from it. */
+      at?: number;
       thinkingStartedAt?: number;
       thinkingMs?: number;
     }
@@ -48,7 +50,7 @@ export function fromTranscript(messages: TranscriptMessage[]): Item[] {
     else if (m.role === "summary") items.push({ kind: "summary", key: key(), text: m.text });
     else if (m.role === "assistant") {
       if (m.text || m.thinking || m.error) {
-        items.push({ kind: "assistant", key: key(), text: m.text, thinking: m.thinking ?? "", error: m.error, open: false });
+        items.push({ kind: "assistant", key: key(), text: m.text, thinking: m.thinking ?? "", error: m.error, open: false, at: m.timestamp });
       }
       for (const call of m.toolCalls ?? []) {
         items.push({ kind: "tool", key: key(), id: call.id, name: call.name, args: call.args, status: "success" });

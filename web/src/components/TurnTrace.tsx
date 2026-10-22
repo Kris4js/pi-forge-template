@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { Fragment, useContext, useEffect, useState, type ReactNode } from "react";
 import type { Item } from "../conversation";
-import { Button, formatDuration } from "../ui";
+import { Button, formatDuration, formatElapsed } from "../ui";
 import { ASK_USER } from "./AskUserCard";
 import { CodeView, guessLanguage } from "./CodeView";
 import { Markdown } from "./Markdown";
@@ -96,7 +96,7 @@ export function TurnTrace({ body, live, startedAt, durationMs, finalStatus, onDe
       ? "等待你的选择"
       : live
       ? "正在处理"
-      : summaryTitle(finalStatus, tools.length, failed, process.some((s) => s.kind === "thinking"));
+      : summaryTitle(finalStatus, tools.length, failed, elapsed);
 
   return (
     <div className="turn-trace">
@@ -104,7 +104,7 @@ export function TurnTrace({ body, live, startedAt, durationMs, finalStatus, onDe
         <TraceCollapsibleTrigger>
           <TraceLine status={status}>
             <TraceTitle>{title}</TraceTitle>
-            {elapsed !== undefined && elapsed > 0 && <TraceDescription>{formatDuration(elapsed)}</TraceDescription>}
+            {live && elapsed !== undefined && elapsed > 0 && <TraceDescription>{formatElapsed(elapsed)}</TraceDescription>}
           </TraceLine>
         </TraceCollapsibleTrigger>
         <TraceCollapsibleContent className="turn-trace-steps">
@@ -126,11 +126,12 @@ export function TurnTrace({ body, live, startedAt, durationMs, finalStatus, onDe
   );
 }
 
-function summaryTitle(finalStatus: string | undefined, toolCount: number, failed: number, thought: boolean) {
-  const head = finalStatus === "cancelled" ? "已停止" : finalStatus === "timeout" ? "超时" : finalStatus === "failed" ? "执行失败" : "已处理";
-  const parts = [head];
+/** "Thought for 12s" for a finished turn; stopped / failed turns say so instead. */
+function summaryTitle(finalStatus: string | undefined, toolCount: number, failed: number, elapsed: number | undefined) {
+  const parts = [
+    finalStatus === "cancelled" ? "已停止" : finalStatus === "timeout" ? "超时" : finalStatus === "failed" ? "执行失败" : elapsed ? `Thought for ${formatElapsed(elapsed)}` : "已处理",
+  ];
   if (toolCount) parts.push(`调用 ${toolCount} 个工具`);
-  else if (thought) parts.push("经过思考");
   if (failed) parts.push(`${failed} 个失败或被拒绝`);
   return parts.join("，");
 }

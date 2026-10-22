@@ -13,7 +13,7 @@ import { encodeAttachments } from "./lib/attachments";
 import { agentIcon } from "./lib/icons";
 import { applyEvent, fromTranscript, userItem, type Item } from "./conversation";
 import { useScrollPinning } from "./hooks/useScrollPinning";
-import { Button, LiveDot, Modal } from "./ui";
+import { Button, Modal } from "./ui";
 
 type Theme = "light" | "dark" | "system";
 
@@ -500,10 +500,6 @@ export function App() {
               </span>
             </div>
             <div className="top-right">
-              <span className={`model-badge ${online ? "" : "offline"}`} title={online ? "runtime 在线" : "gateway 不可达"}>
-                <LiveDot tone={online ? (busy ? "clay" : "ok") : "danger"} />
-                <span className="mono">{online ? (selectedModel ?? "pi default") : "离线"}</span>
-              </span>
               <Button
                 size="icon"
                 title="切换主题"

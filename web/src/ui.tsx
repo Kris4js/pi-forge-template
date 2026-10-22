@@ -99,6 +99,13 @@ export function LiveDot({ tone = "clay" }: { tone?: "clay" | "ok" | "muted" | "d
   );
 }
 
+/** Whole seconds, then minutes and seconds: "12s", "1m 05s". */
+export function formatElapsed(ms: number): string {
+  const total = Math.max(1, Math.round(ms / 1000));
+  if (total < 60) return `${total}s`;
+  return `${Math.floor(total / 60)}m ${String(total % 60).padStart(2, "0")}s`;
+}
+
 export function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;

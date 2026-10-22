@@ -1,11 +1,19 @@
-import { Check, Copy, Download, ExternalLink, Monitor, RotateCw, Smartphone, Tablet, X } from "lucide-react";
+import { Check, ChevronDown, Copy, Download, ExternalLink, Monitor, RotateCw, Smartphone, Tablet, X } from "lucide-react";
 import { createContext, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Api, ArtifactSummary } from "../api";
 import { prepareArtifactHtml, safeLinkUrl, type FrameMessage } from "../lib/artifact-frame";
 import { EMPTY_DRAFT_DOCUMENT, patchDraftDocument } from "../lib/draft-preview";
 import { Button } from "../ui";
 import { Card, CardContent, CardHeader } from "./ui/card";
-import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "./ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
 import { Skeleton } from "./ui/skeleton";
 
 /** Lets transcript items (e.g. a publish_design step) open a revision in the preview. */
@@ -80,13 +88,8 @@ export function PreviewPanel({ api, sessionId, artifacts, revision, onRevision, 
   // Loading = waiting for the agent's first draft, fetching a version, or a fetched page not yet painted.
   const loading =
     !error && !draftLayer && ((live && !current) || (!!key && !current) || (!!current && paintedKey !== key));
-  const versionItems = [
-    { label: `v${latest}（最新）`, value: "latest" },
-    ...[...artifacts]
-      .reverse()
-      .slice(1)
-      .map((a) => ({ label: `v${a.revision} · ${new Date(a.createdAt).toLocaleTimeString()}`, value: String(a.revision) })),
-  ];
+  // Newest first; the latest entry stands for "follow the latest" (revision null).
+  const versions = [...artifacts].reverse();
   const width = DEVICE_WIDTH[device];
 
   const copy = async () => {
@@ -112,28 +115,37 @@ export function PreviewPanel({ api, sessionId, artifacts, revision, onRevision, 
   return (
     <div className="preview">
       <div className="preview-toolbar">
-        {artifacts.length > 0 ? (
-          <Select
-            items={versionItems}
-            value={revision === null ? "latest" : String(revision)}
-            onValueChange={(value) => onRevision(value === "latest" || value == null ? null : Number(value))}
-          >
-            <SelectTrigger size="sm" className="preview-version" aria-label="版本">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                <SelectLabel>版本</SelectLabel>
-                {versionItems.map((item) => (
-                  <SelectItem key={item.value} value={item.value}>
-                    {item.label}
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            </SelectContent>
-          </Select>
+        {artifacts.length > 1 ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger className="version-trigger" aria-label={`版本：v${shown}`}>
+              <VersionLabel revision={shown} latest={shown === latest} />
+              <ChevronDown className="chevron-icon" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="version-menu">
+              <DropdownMenuGroup>
+                <DropdownMenuLabel>版本历史</DropdownMenuLabel>
+                <DropdownMenuRadioGroup
+                  value={revision === null ? "latest" : String(revision)}
+                  onValueChange={(value) => onRevision(value === "latest" ? null : Number(value))}
+                >
+                  {versions.map((a) => (
+                    <DropdownMenuRadioItem key={a.revision} value={a.revision === latest ? "latest" : String(a.revision)} closeOnClick>
+                      <span className="version-name">v{a.revision}</span>
+                      <span className="version-meta" title={new Date(a.createdAt).toLocaleString()}>
+                        {a.revision === latest ? "最新" : relativeTime(a.createdAt)}
+                      </span>
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : artifacts.length === 1 ? (
+          <span className="version-trigger static" title={new Date(artifacts[0]!.createdAt).toLocaleString()}>
+            <VersionLabel revision={latest} latest />
+          </span>
         ) : (
-          <span className="preview-version muted">{draftLayer ? "生成中…" : "暂无版本"}</span>
+          <span className="version-trigger static muted">{draftLayer ? "生成中…" : "暂无版本"}</span>
         )}
         {draftLayer && liveDraft && <span className="preview-live">实时草稿</span>}
         <span className="grow" />
@@ -349,4 +361,22 @@ function SkeletonCard() {
       </CardContent>
     </Card>
   );
+}
+
+function VersionLabel({ revision, latest }: { revision?: number; latest: boolean }) {
+  return (
+    <span className="version-label">
+      v{revision}
+      {latest && <span className="version-latest">最新</span>}
+    </span>
+  );
+}
+
+/** "刚刚" / "3 分钟前" / "2 小时前", then a date for anything older than a day. */
+function relativeTime(iso: string, now = Date.now()) {
+  const seconds = Math.max(0, (now - Date.parse(iso)) / 1000);
+  if (seconds < 60) return "刚刚";
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} 分钟前`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)} 小时前`;
+  return new Date(iso).toLocaleDateString(undefined, { month: "numeric", day: "numeric" });
 }
