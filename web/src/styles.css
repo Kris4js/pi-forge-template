@@ -1008,11 +1008,6 @@ kbd {
   background: var(--cds-fill-ghost-hover);
 }
 
-.ask-user-step {
-  display: inline-flex;
-  gap: 2px;
-}
-
 .ask-user > header {
   display: flex;
   align-items: center;

@@ -1,4 +1,4 @@
-import { Check, ChevronLeft, ChevronRight, PenLine, X } from "lucide-react";
+import { Check, PenLine, X } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import type { AskAnswer, PendingQuestion } from "../api";
 import { Button } from "../ui";
@@ -18,10 +18,20 @@ type Draft = { selected: string[]; other: string };
 
 const answered = (d: Draft | undefined) => !!d && (d.selected.length > 0 || d.other.trim() !== "");
 
+/** The first unanswered question after `from` (wrapping around), or -1 when no other one is open. */
+const nextOpen = (drafts: Draft[], from: number) => {
+  for (let step = 1; step < drafts.length; step++) {
+    const i = (from + step) % drafts.length;
+    if (!answered(drafts[i])) return i;
+  }
+  return -1;
+};
+
 /**
  * An ask_user call, docked in place of the composer while the agent waits on it. Several questions
  * are tabs; each takes one option (or several when multiSelect) plus optional words of the user's own.
- * Submit sends every answer at once; skip (✕ / Esc) lets the agent decide.
+ * The primary button reads "下一项" (next open question) until every question is answered, then
+ * "提交" sends every answer at once; skip (✕ / Esc) lets the agent decide.
  */
 export function AskUserCard({ ask, agentName, onAnswer }: Props) {
   const questions = ask.questions;
@@ -33,27 +43,31 @@ export function AskUserCard({ ask, agentName, onAnswer }: Props) {
   const draft = drafts[tab]!;
   const many = questions.length > 1;
   const complete = drafts.every(answered);
-  const last = tab === questions.length - 1;
+  const ahead = nextOpen(drafts, tab);
 
   useEffect(() => {
     card.current?.querySelector<HTMLButtonElement>("ol button")?.focus({ preventScroll: true });
   }, [ask.toolCallId, tab]);
 
-  const update = (patch: (d: Draft) => Draft) => setDrafts((all) => all.map((d, i) => (i === tab ? patch(d) : d)));
+  const update = (patch: (d: Draft) => Draft) => {
+    const all = drafts.map((d, i) => (i === tab ? patch(d) : d));
+    setDrafts(all);
+    return all;
+  };
 
   /**
    * Multi-select toggles the option. Single choice selects it (radio: picking it again keeps it) and
-   * replaces any own words; with several tabs it then moves on to the next question.
+   * replaces any own words; with several tabs it then moves on to the next open question.
    */
   const choose = (option: string) => {
     if (q.multiSelect) {
       update((d) => ({ ...d, selected: d.selected.includes(option) ? d.selected.filter((o) => o !== option) : [...d.selected, option] }));
       return;
     }
-    update(() => ({ selected: [option], other: "" }));
-    if (many && !last) {
+    const to = nextOpen(update(() => ({ selected: [option], other: "" })), tab);
+    if (many && to !== -1) {
       const from = tab;
-      setTimeout(() => setTab((t) => (t === from ? from + 1 : t)), 140);
+      setTimeout(() => setTab((t) => (t === from ? to : t)), 140);
     }
   };
 
@@ -67,15 +81,11 @@ export function AskUserCard({ ask, agentName, onAnswer }: Props) {
     }
   };
   const submit = () => {
-    if (!complete) {
-      // Take the user to the first question still open.
-      setTab(drafts.findIndex((d) => !answered(d)));
-      return;
-    }
+    if (!complete) return;
     void send({ answers: drafts.map((d) => ({ selected: d.selected, other: d.other.trim() || undefined })) });
   };
-  /** Single-choice questions advance on pick / Enter; the last one submits. */
-  const next = () => (last ? submit() : setTab(tab + 1));
+  /** Until every question is answered, go to the next open one; then submit. */
+  const next = () => (complete ? submit() : ahead !== -1 && setTab(ahead));
   const skip = () => void send({ skip: true });
 
   // 1–9 pick, ←/→ switch tabs, Enter goes on, Esc skips — except while typing.
@@ -172,17 +182,11 @@ export function AskUserCard({ ask, agentName, onAnswer }: Props) {
             }}
           />
         </label>
-        {many && (
-          <span className="ask-user-step">
-            <Button size="icon" aria-label="上一个问题" disabled={tab === 0} icon={<ChevronLeft size={16} />} onClick={() => setTab(tab - 1)} />
-            <Button size="icon" aria-label="下一个问题" disabled={last} icon={<ChevronRight size={16} />} onClick={() => setTab(tab + 1)} />
-          </span>
-        )}
         <Button variant="outline" disabled={sending} onClick={skip}>
           跳过
         </Button>
-        <Button variant="primary" disabled={(!complete && (!many || !answered(draft))) || sending} onClick={submit}>
-          {sending ? "提交中…" : complete || !many ? "提交" : `提交（${drafts.filter(answered).length}/${questions.length}）`}
+        <Button variant="primary" disabled={sending || (!complete && ahead === -1)} onClick={next}>
+          {sending ? "提交中…" : complete || ahead === -1 ? "提交" : "下一项"}
         </Button>
       </footer>
     </section>
