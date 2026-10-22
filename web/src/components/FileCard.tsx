@@ -1,17 +1,32 @@
-import { FileSpreadsheet, FileText, Presentation } from "lucide-react";
+import { FileText } from "lucide-react";
 import { fileTypeIcons } from "../../shared/file-types";
 import type { FileAsset } from "../api";
 import { fileExtension, fileKind, formatFileSize } from "../lib/attachments";
 
-const ICONS: Record<string, string> = { docx: fileTypeIcons.word, xlsx: fileTypeIcons.excel, csv: fileTypeIcons.excel, pdf: fileTypeIcons.pdf, md: fileTypeIcons.markdown };
+const ICONS: Record<string, string> = {
+  docx: fileTypeIcons.word,
+  xlsx: fileTypeIcons.excel,
+  csv: fileTypeIcons.excel,
+  pdf: fileTypeIcons.pdf,
+  md: fileTypeIcons.markdown,
+  markdown: fileTypeIcons.markdown,
+  html: fileTypeIcons.html,
+  htm: fileTypeIcons.html,
+  js: fileTypeIcons.javascript,
+  jsx: fileTypeIcons.javascript,
+  mjs: fileTypeIcons.javascript,
+  cjs: fileTypeIcons.javascript,
+  pptx: fileTypeIcons.ppt,
+  txt: fileTypeIcons.txt,
+  zip: fileTypeIcons.zip,
+};
 
 /** Type icon for an attachment: the brand artwork when we have it, otherwise a tinted glyph. */
 export function FileIcon({ name, size = 24 }: { name: string; size?: number }) {
   const extension = fileExtension(name);
   const src = ICONS[extension];
   if (src) return <img className="file-icon" src={src} alt="" />;
-  const Glyph = extension === "pptx" ? Presentation : extension === "xlsx" ? FileSpreadsheet : FileText;
-  return <Glyph className="file-icon" size={size} />;
+  return <FileText className="file-icon" size={size} />;
 }
 
 /** A sent attachment on the user's message: icon, name, type and size. */
