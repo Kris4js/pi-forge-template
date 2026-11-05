@@ -13,10 +13,14 @@ export type Agent = {
   preview: boolean;
 };
 
+export type Project = { id: string; name: string; instructions: string; createdAt: string; updatedAt: string };
+
+
 /** Sessions belong to the user; agentId is the agent the session is bound to. */
 export type SessionSummary = {
   id: string;
   agentId?: string;
+  projectId?: string;
   pinned?: boolean;
   name?: string;
   updatedAt: string;
@@ -39,6 +43,8 @@ export type ModelsResult = { models: ModelChoice[]; defaultModel: string; thinki
 
 export type ArtifactSummary = { revision: number; bytes: number; createdAt: string };
 export type ArtifactDetail = ArtifactSummary & { html: string };
+/** Latest revision of each conversation that has published a page. */
+export type ArtifactEntry = ArtifactSummary & { sessionId: string; sessionName: string; agentId?: string; projectId?: string; revisions: number };
 
 export type Usage = { inputTokens: number; outputTokens: number; totalTokens: number };
 
@@ -110,16 +116,31 @@ export class Api {
   agents() {
     return this.request<Agent[]>("GET", "/v1/agents");
   }
-  sessions() {
-    return this.request<SessionSummary[]>("GET", "/v1/sessions");
+  projects() {
+    return this.request<Project[]>("GET", "/v1/projects");
+  }
+  createProject(project: { name: string; instructions?: string }) {
+    return this.request<Project>("POST", "/v1/projects", project);
+  }
+  updateProject(id: string, update: { name?: string; instructions?: string }) {
+    return this.request<Project>("PATCH", `/v1/projects/${encodeURIComponent(id)}`, update);
+  }
+  deleteProject(id: string) {
+    return this.request<void>("DELETE", `/v1/projects/${encodeURIComponent(id)}`);
+  }
+  sessions(projectId?: string) {
+    return this.request<SessionSummary[]>("GET", `/v1/sessions${projectId === undefined ? "" : `?projectId=${encodeURIComponent(projectId)}`}`);
   }
   session(sessionId: string) {
-    return this.request<{ id: string; agentId?: string; messages: TranscriptMessage[] }>("GET", `/v1/sessions/${sessionId}`);
+    return this.request<{ id: string; agentId?: string; projectId?: string; messages: TranscriptMessage[] }>("GET", `/v1/sessions/${sessionId}`);
   }
   async image(sessionId: string, id: string, signal?: AbortSignal): Promise<Blob> {
     const res = await fetch(`/v1/sessions/${encodeURIComponent(sessionId)}/images/${encodeURIComponent(id)}`, { headers: this.headers(), signal });
     if (!res.ok) throw new ApiError(res.status, await errorMessage(res));
     return res.blob();
+  }
+  allArtifacts() {
+    return this.request<ArtifactEntry[]>("GET", "/v1/artifacts");
   }
   artifacts(sessionId: string) {
     return this.request<ArtifactSummary[]>("GET", `/v1/sessions/${sessionId}/artifacts`);
@@ -127,7 +148,7 @@ export class Api {
   artifact(sessionId: string, revision: number | "latest") {
     return this.request<ArtifactDetail>("GET", `/v1/sessions/${sessionId}/artifacts/${revision}`);
   }
-  updateSession(sessionId: string, update: { name?: string; pinned?: boolean }) {
+  updateSession(sessionId: string, update: { name?: string; pinned?: boolean; projectId?: string | null }) {
     return this.request<void>("PATCH", `/v1/sessions/${sessionId}`, update);
   }
   deleteSession(sessionId: string) {
@@ -149,7 +170,7 @@ export class Api {
 
   /** Starts a run and feeds SSE events to onEvent until the stream ends. */
   async run(
-    body: { agentId: string; sessionId?: string; text: string; attachments?: Array<{ name: string; mimeType: string; data: string }>; model?: string; imageModel?: string; thinkingLevel?: string },
+    body: { agentId: string; sessionId?: string; projectId?: string; text: string; attachments?: Array<{ name: string; mimeType: string; data: string }>; model?: string; imageModel?: string; thinkingLevel?: string },
     onEvent: (e: RunEvent) => void,
     signal?: AbortSignal,
   ) {

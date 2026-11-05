@@ -11,12 +11,17 @@ export const Methods = {
   modelsList: "models.list",
   runStart: "run.start",
   runCancel: "run.cancel",
+  projectList: "project.list",
+  projectCreate: "project.create",
+  projectUpdate: "project.update",
+  projectDelete: "project.delete",
   sessionList: "session.list",
   sessionGet: "session.get",
   sessionInfo: "session.info",
   sessionDelete: "session.delete",
   sessionUpdate: "session.update",
   artifactList: "artifact.list",
+  artifactListAll: "artifact.listAll",
   imageModelsList: "images.models",
   imageGet: "image.get",
   artifactGet: "artifact.get",
@@ -30,7 +35,10 @@ export const Methods = {
 export type Tenant = { workspace: string; userId: string };
 
 /** Sessions belong to the user, not to an agent; a session records the agent it was started with. */
-export type TenantParams = { tenant: Tenant };
+export type TenantParams = { tenant: Tenant; projectId?: string };
+
+export type Project = { id: string; name: string; instructions: string; createdAt: string; updatedAt: string };
+export type ProjectParams = TenantParams & { projectId?: string; name?: unknown; instructions?: unknown };
 
 export type SessionScope = TenantParams & { agentId: string };
 
@@ -73,6 +81,7 @@ export type SessionGetParams = TenantParams & { sessionId: string };
 
 export type SessionSummary = {
   id: string;
+  projectId?: string;
   /** The agent the session is bound to. */
   agentId?: string;
   /** Pinned sessions are listed first. */
@@ -97,10 +106,11 @@ export type TranscriptMessage =
   | { role: "tool"; toolCallId: string; toolName: string; text: string; isError: boolean; artifactRevision?: number; images?: ImageAsset[] }
   | { role: "summary"; text: string };
 
-export type SessionInfo = { id: string; agentId?: string };
+export type SessionInfo = { id: string; agentId?: string; projectId?: string };
 
 /** Rename (pi session_info entry) and/or pin (a per-user preference, not session content). */
-export type SessionUpdateParams = SessionGetParams & { name?: string; pinned?: boolean };
+/** projectId moves the session into a project; null removes it from its project. */
+export type SessionUpdateParams = Omit<SessionGetParams, "projectId"> & { name?: string; pinned?: boolean; projectId?: string | null };
 
 export type SessionDetail = SessionInfo & { name?: string; messages: TranscriptMessage[] };
 
@@ -110,6 +120,15 @@ export type ArtifactSummary = { revision: number; bytes: number; createdAt: stri
 export type ArtifactGetParams = SessionGetParams & { revision?: number };
 
 export type ArtifactDetail = ArtifactSummary & { html: string };
+
+/** The latest revision of every conversation that has published an artifact, newest first. */
+export type ArtifactEntry = ArtifactSummary & {
+  sessionId: string;
+  sessionName: string;
+  agentId?: string;
+  projectId?: string;
+  revisions: number;
+};
 
 export type ToolAuthorizeParams = {
   runId: string;

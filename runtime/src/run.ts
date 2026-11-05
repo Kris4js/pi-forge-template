@@ -16,7 +16,9 @@ import type { ImageContent } from "@earendil-works/pi-ai";
 import { ArtifactStore } from "./artifacts/store.ts";
 import { governanceExtension } from "./governance.ts";
 import { RpcError, type Peer } from "./ipc/peer.ts";
-import { bindAgent, openSession, sessionAgent, sessionKey as keyOf, textOf } from "./memory/sessions.ts";
+import { bindAgent, bindProject, openSession, sessionAgent, sessionProject, sessionKey as keyOf, textOf } from "./memory/sessions.ts";
+import { flushSession } from "./memory/managed-session.ts";
+import { getProject } from "./memory/projects.ts";
 import { Models } from "./model/registry.ts";
 import {
   ErrorCodes,
@@ -39,12 +41,12 @@ export type RunnerDeps = {
   log: (msg: string) => void;
 };
 
-type ActiveRun = { runId: string; sessionKey?: string; session?: AgentSession; cancelled: boolean };
+type ActiveRun = { runId: string; sessionKey?: string; projectKey?: string; session?: AgentSession; cancelled: boolean; done?: Promise<void> };
 
 /**
  * Executes runs on pi AgentSessions. One AgentSession is built per run and disposed afterwards;
- * conversation state lives entirely in pi's session JSONL, so the runtime holds no tenant state
- * between runs and can be restarted at any time by the gateway.
+ * conversation state lives in the configured session store. Completed entries are flushed before
+ * reporting completion and before graceful shutdown.
  */
 export class Runner {
   private readonly active = new Map<string, ActiveRun>();
@@ -59,6 +61,10 @@ export class Runner {
   /** Whether a run currently holds this session (see memory/sessions.ts sessionKey). */
   isBusy(sessionKey: string): boolean {
     return this.busySessions.has(sessionKey);
+  }
+
+  isProjectBusy(projectKey: string): boolean {
+    return [...this.active.values()].some((run) => run.projectKey === projectKey);
   }
 
   async start(params: RunStartParams): Promise<RunStartResult> {
@@ -92,12 +98,21 @@ export class Runner {
       if (bound && bound !== scope.agentId) {
         throw new RpcError(ErrorCodes.conflict, `session belongs to agent ${bound}`, { agentId: bound });
       }
-      if (!bound) bindAgent(sessionManager, scope.agentId);
+      const boundProject = sessionProject(sessionManager);
+      if (params.sessionId && params.projectId !== undefined && params.projectId !== boundProject) {
+        throw new RpcError(ErrorCodes.conflict, "session belongs to a different project");
+      }
+      const projectId = params.sessionId ? boundProject : params.projectId;
+      const project = projectId !== undefined ? await getProject(paths, projectId) : undefined;
+      if (project) run.projectKey = keyOf(paths, project.id);
 
       const sessionKey = keyOf(paths, sessionManager.getSessionId());
       if (this.busySessions.has(sessionKey)) throw new RpcError(ErrorCodes.conflict, "session is busy");
       this.busySessions.add(sessionKey);
       run.sessionKey = sessionKey;
+      if (!bound) bindAgent(sessionManager, scope.agentId);
+      if (!boundProject && project) bindProject(sessionManager, project.id);
+      await flushSession(sessionManager);
 
       const workspaceInstructions = existsSync(paths.workspaceInstructions)
         ? await readFile(paths.workspaceInstructions, "utf8")
@@ -118,9 +133,10 @@ export class Runner {
         // pi context files, supplied explicitly: walking up from cwd would cross tenant boundaries.
         noContextFiles: true,
         agentsFilesOverride: () => ({
-          agentsFiles: workspaceInstructions.trim()
-            ? [{ path: paths.workspaceInstructions, content: workspaceInstructions }]
-            : [],
+          agentsFiles: [
+            ...(workspaceInstructions.trim() ? [{ path: paths.workspaceInstructions, content: workspaceInstructions }] : []),
+            ...(project?.instructions.trim() ? [{ path: `project://${project.id}/instructions`, content: project.instructions }] : []),
+          ],
         }),
         systemPromptOverride: () => agent.systemPrompt,
         extensionFactories: [
@@ -180,7 +196,7 @@ export class Runner {
       if (agent.manifest.tools?.includes(ASK_USER)) {
         customTools.push(
           askUserTool((toolCallId, questions, signal) =>
-            this.deps.peer.request<UserAskResult>(Methods.userAsk, { runId, toolCallId, questions } satisfies UserAskParams, signal),
+            flushSession(sessionManager).then(() => this.deps.peer.request<UserAskResult>(Methods.userAsk, { runId, toolCallId, questions } satisfies UserAskParams, signal)),
           ),
         );
       }
@@ -222,7 +238,7 @@ export class Runner {
       agentId: scope.agentId,
       model: session.model ? Models.label(session.model) : undefined,
     });
-    void this.execute(run, session, text, emit, preview, images);
+    run.done = this.execute(run, session, text, emit, preview, images);
     return { sessionId };
   }
 
@@ -236,7 +252,9 @@ export class Runner {
 
   /** Abort everything; used on shutdown. */
   async cancelAll(): Promise<void> {
-    await Promise.all([...this.active.keys()].map((id) => this.cancel(id)));
+    const active = [...this.active.values()];
+    await Promise.all(active.map((run) => this.cancel(run.runId)));
+    await Promise.all(active.map((run) => run.done));
   }
 
   private async execute(
@@ -273,6 +291,12 @@ export class Runner {
       error = run.cancelled ? undefined : err instanceof Error ? err.message : String(err);
     } finally {
       unsubscribe();
+      try {
+        await flushSession(session.sessionManager);
+      } catch (err) {
+        status = "failed";
+        error = `conversation persistence failed: ${err instanceof Error ? err.message : String(err)}`;
+      }
       emit({ type: "run_finished", status, error, usage });
       this.finish(run);
       try {

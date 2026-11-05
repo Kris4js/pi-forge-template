@@ -1,13 +1,17 @@
 import { AnimatePresence, motion, MotionConfig } from "framer-motion";
 import { AppWindow, ArrowDown, Monitor, Moon, PanelLeft, PanelRight, Sun, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { Api, type Agent, type ArtifactSummary, type Identity, type ImageModels, type ModelsResult, type PendingQuestion, type RunEvent, type SessionSummary } from "./api";
+import { Api, type Agent, type ArtifactEntry, type ArtifactSummary, type Identity, type ImageModels, type ModelsResult, type PendingQuestion, type Project, type RunEvent, type SessionSummary } from "./api";
 import { Composer, type ComposerHandle } from "./components/Composer";
 import { DetailsPanel } from "./components/DetailsPanel";
 import { PreviewLink, PreviewPanel } from "./components/PreviewPanel";
 import { MessageList } from "./components/MessageList";
-import { Sidebar, sessionTitle } from "./components/Sidebar";
+import { Sidebar, sessionTitle, type MainView } from "./components/Sidebar";
+import { ChatTitleMenu } from "./components/ChatTitleMenu";
 import { NewChat } from "./components/NewChat";
+import { ProjectModal } from "./components/ProjectModal";
+import { ProjectsView } from "./components/ProjectsView";
+import { ArtifactsView } from "./components/ArtifactsView";
 import { AskUserCard, type AskUserAnswer } from "./components/AskUserCard";
 import { encodeAttachments } from "./lib/attachments";
 import { agentIcon } from "./lib/icons";
@@ -69,7 +73,14 @@ export function App() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [agentId, setAgentId] = useState<string>();
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [projectsLoading, setProjectsLoading] = useState(true);
+  // The project new conversations start in; it also scopes the sidebar history.
+  const [scopeProjectId, setScopeProjectId] = useState<string>();
+  const [view, setView] = useState<MainView>("chat");
+  const [openedProjectId, setOpenedProjectId] = useState<string>();
   const [sessionId, setSessionId] = useState<string>();
+  const [sessionProjectId, setSessionProjectId] = useState<string>();
   const [items, setItems] = useState<Item[]>([]);
   const [busy, setBusy] = useState(false);
   const [runId, setRunId] = useState<string>();
@@ -77,14 +88,24 @@ export function App() {
   const [question, setQuestion] = useState<PendingQuestion>();
   const [notice, setNotice] = useState<string>();
   const [mobileNav, setMobileNav] = useState(false);
-  const [modal, setModal] = useState<{ kind: "settings" } | { kind: "delete"; session: SessionSummary }>();
+  // A project modal opened from a conversation's "添加到项目 → 新建项目" files that conversation into it.
+  const [modal, setModal] = useState<{ kind: "settings" } | { kind: "delete"; session: SessionSummary } | { kind: "project"; project?: Project; moveSession?: SessionSummary }>();
   const [loadingSession, setLoadingSession] = useState(false);
 
+  // Ignore replies from a previous identity or an older conversation navigation.
+  const apiRef = useRef(api);
+  apiRef.current = api;
+  const navigation = useRef(0);
+  const sessionsRequest = useRef(0);
+  const projectsRequest = useRef(0);
   const abortRef = useRef<AbortController>();
   const composer = useRef<ComposerHandle>(null);
   const scroll = useScrollPinning([items]);
   const agent = agents.find((a) => a.id === agentId);
   const currentSession = sessions.find((s) => s.id === sessionId);
+  // The project shown before the title: the conversation's own, or the one a new chat will start in.
+  const currentProjectId = sessionId ? currentSession?.projectId ?? sessionProjectId : scopeProjectId;
+  const currentProject = projects.find((p) => p.id === currentProjectId);
 
   // Theme: explicit choice or follow the OS.
   useEffect(() => {
@@ -111,15 +132,18 @@ export function App() {
   }, [previewWidth, resizing]);
 
   useEffect(() => {
+    let active = true;
     store(IDENTITY_KEY, identity);
     setNotice(undefined);
     api
       .me()
       .then((me) => {
+        if (!active) return;
         setModel(me.runtime.model);
         setOnline(true);
       })
       .catch((e: Error) => {
+        if (!active) return;
         setOnline(false);
         setNotice(`无法连接 gateway：${e.message}`);
       });
@@ -127,30 +151,50 @@ export function App() {
     api
       .models()
       .then((result) => {
+        if (!active) return;
         setCatalog(result);
         setModelKey((key) => (result.models.some((m) => m.key === key) ? key : result.defaultModel));
         setEffort((level) => (result.thinkingLevels.includes(level) ? level : result.defaultThinkingLevel));
       })
-      .catch((e: Error) => setNotice(e.message));
+      .catch((e: Error) => { if (active) setNotice(e.message); });
     api.imageModels().then((result) => {
+      if (!active) return;
       setImageModels(result);
       setImageModel((current) => result.models.includes(current) ? current : result.defaultModel);
-    }).catch((e: Error) => setNotice(e.message));
+    }).catch((e: Error) => { if (active) setNotice(e.message); });
     api
       .agents()
       .then((list) => {
+        if (!active) return;
         setAgents(list);
         setAgentId((current) => (list.some((a) => a.id === current) ? current : list[0]?.id));
       })
-      .catch((e: Error) => setNotice(e.message));
+      .catch((e: Error) => { if (active) setNotice(e.message); });
+    return () => { active = false; };
   }, [api, identity]);
 
   // Sessions belong to the user and mix all agents; each row carries the agent it is bound to.
   const refreshSessions = useCallback(() => {
-    api
-      .sessions()
-      .then(setSessions)
-      .catch((e: Error) => setNotice(e.message));
+    if (apiRef.current !== api) return;
+    const request = ++sessionsRequest.current;
+    api.sessions().then((list) => {
+      if (apiRef.current === api && request === sessionsRequest.current) setSessions(list);
+    }).catch((e: Error) => {
+      if (apiRef.current === api && request === sessionsRequest.current) setNotice(e.message);
+    });
+  }, [api]);
+
+  const refreshProjects = useCallback(() => {
+    if (apiRef.current !== api) return;
+    const request = ++projectsRequest.current;
+    setProjectsLoading(true);
+    api.projects().then((list) => {
+      if (apiRef.current === api && request === projectsRequest.current) setProjects(list);
+    }).catch((e: Error) => {
+      if (apiRef.current === api && request === projectsRequest.current) setNotice(e.message);
+    }).finally(() => {
+      if (apiRef.current === api && request === projectsRequest.current) setProjectsLoading(false);
+    });
   }, [api]);
 
   const clearPreview = useCallback(() => {
@@ -161,20 +205,40 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    ++navigation.current;
+    abortRef.current?.abort();
+    abortRef.current = undefined;
+    setBusy(false);
+    setRunId(undefined);
+    setQuestion(undefined);
+    setLoadingSession(false);
     setSessionId(undefined);
+    setSessionProjectId(undefined);
+    setScopeProjectId(undefined);
+    setView("chat");
+    setOpenedProjectId(undefined);
+    setSessions([]);
+    setProjects([]);
+    setModal(undefined);
     setItems([]);
     clearPreview();
     refreshSessions();
-  }, [refreshSessions, clearPreview]);
+    refreshProjects();
+  }, [refreshSessions, refreshProjects, clearPreview]);
 
-  const newChat = useCallback(() => {
+  const newChat = useCallback((projectId?: string) => {
     if (busy && !question) return;
     if (question) detach();
+    ++navigation.current;
+    setLoadingSession(false);
+    setSessionProjectId(undefined);
     setSessionId(undefined);
+    setScopeProjectId(projectId);
+    setView("chat");
     setItems([]);
     clearPreview();
     setMobileNav(false);
-    composer.current?.focus();
+    requestAnimationFrame(() => composer.current?.focus());
   }, [busy, question, clearPreview]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ⌘K / Ctrl+K: new conversation.
@@ -201,11 +265,19 @@ export function App() {
   async function openSession(id: string) {
     if (busy && !question) return;
     if (question) detach();
+    const nav = ++navigation.current;
+    const isCurrent = () => nav === navigation.current && apiRef.current === api;
     setMobileNav(false);
     setSessionId(id);
+    setView("chat");
+    setItems([]);
+    clearPreview();
     setLoadingSession(true);
     try {
       const [detail, list] = await Promise.all([api.session(id), api.artifacts(id)]);
+      if (!isCurrent()) return;
+      setSessionProjectId(detail.projectId);
+      setScopeProjectId(detail.projectId);
       // A session is continued by the agent it was started with.
       if (detail.agentId && agents.some((a) => a.id === detail.agentId)) setAgentId(detail.agentId);
       setItems(fromTranscript(detail.messages));
@@ -214,22 +286,64 @@ export function App() {
       setDraft(null);
       setPanel((p) => (list.length ? "preview" : p === "preview" ? null : p));
       requestAnimationFrame(() => scroll.scrollToBottom(false));
-      void resume(id);
-    } catch (e) {
-      setNotice((e as Error).message);
-    } finally {
       setLoadingSession(false);
+      void resume(id, isCurrent).catch((e: Error) => { if (isCurrent()) setNotice(e.message); });
+    } catch (e) {
+      if (isCurrent()) {
+        setNotice((e as Error).message);
+        setSessionId(undefined);
+        setSessionProjectId(undefined);
+      }
+    } finally {
+      if (isCurrent()) setLoadingSession(false);
     }
   }
 
-  async function updateSession(session: SessionSummary, update: { name?: string; pinned?: boolean }) {
+  function showView(next: Exclude<MainView, "chat">) {
+    if (busy && !question) return;
+    setView(next);
+    if (next === "projects") setOpenedProjectId(undefined);
+    setMobileNav(false);
+  }
+
+  function projectSaved(project: Project, created: boolean) {
+    if (apiRef.current !== api) return;
+    ++projectsRequest.current;
+    setProjectsLoading(false);
+    setProjects((list) => [...list.filter((p) => p.id !== project.id), project].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)));
+    const moveSession = modal?.kind === "project" ? modal.moveSession : undefined;
+    setModal(undefined);
+    if (created && moveSession) {
+      void updateSession(moveSession, { projectId: project.id });
+    } else if (created) {
+      setView("projects");
+      setOpenedProjectId(project.id);
+    }
+  }
+
+  function projectDeleted(project: Project) {
+    if (apiRef.current !== api) return;
+    ++projectsRequest.current;
+    setProjectsLoading(false);
+    setProjects((list) => list.filter((p) => p.id !== project.id));
+    setModal(undefined);
+    if (openedProjectId === project.id) setOpenedProjectId(undefined);
+    if (scopeProjectId === project.id) setScopeProjectId(undefined);
+    refreshSessions();
+  }
+
+  async function updateSession(session: SessionSummary, update: { name?: string; pinned?: boolean; projectId?: string | null }) {
     // Optimistic: reflect the change at once, then reconcile with the server's order.
-    setSessions((list) => list.map((s) => (s.id === session.id ? { ...s, ...update } : s)));
+    const local = { ...update, projectId: update.projectId === undefined ? session.projectId : update.projectId ?? undefined };
+    setSessions((list) => list.map((s) => (s.id === session.id ? { ...s, ...local } : s)));
+    if (update.projectId !== undefined && session.id === sessionId) setSessionProjectId(local.projectId);
     try {
       await api.updateSession(session.id, update);
     } catch (e) {
+      if (apiRef.current !== api) return;
       const err = e as Error & { status?: number };
-      setNotice(err.status === 409 ? "会话正在运行，结束后再重命名" : err.message);
+      setNotice(err.status === 409 ? "会话正在运行，结束后再修改" : err.message);
+      if (update.projectId !== undefined && session.id === sessionId) setSessionProjectId(session.projectId);
     }
     refreshSessions();
   }
@@ -237,13 +351,18 @@ export function App() {
   async function confirmDelete(session: SessionSummary) {
     try {
       await api.deleteSession(session.id);
+      if (apiRef.current !== api) return;
       if (session.id === sessionId) {
+        ++navigation.current;
+        setLoadingSession(false);
+        setSessionProjectId(undefined);
         setSessionId(undefined);
         setItems([]);
         clearPreview();
       }
       refreshSessions();
     } catch (e) {
+      if (apiRef.current !== api) return;
       setNotice((e as Error).message);
     }
     setModal(undefined);
@@ -275,14 +394,16 @@ export function App() {
       }
       if (event.type === "artifact" && ctx.session) {
         const sid = ctx.session;
+        const nav = navigation.current;
         api
           .artifacts(sid)
           .then((list) => {
+            if (nav !== navigation.current || apiRef.current !== api) return;
             setArtifacts(list);
             setPreviewRevision(null);
             setDraft(null);
           })
-          .catch((e: Error) => setNotice(e.message));
+          .catch((e: Error) => { if (nav === navigation.current && apiRef.current === api) setNotice(e.message); });
       }
       setItems((prev) => applyEvent(prev, event, { now: Date.now(), model: ctx.model, runStartedAt: ctx.startedAt }));
     }
@@ -313,8 +434,12 @@ export function App() {
   }
 
   async function send(text: string, files: File[] = [], onUploaded?: () => void) {
-    if (!agentId || (!text.trim() && !files.length) || busy) return;
+    if (!agentId || (!text.trim() && !files.length) || busy || loadingSession) return;
+    const nav = navigation.current;
+    const projectId = sessionId ? sessionProjectId : scopeProjectId;
     const attachments = await encodeAttachments(files);
+    if (nav !== navigation.current || apiRef.current !== api) return;
+    setSessionProjectId(projectId);
     const fileAssets = attachments.map((file, index) => ({ name: file.name, mimeType: file.mimeType, size: files[index]!.size })).filter((file) => !file.mimeType.startsWith("image/"));
     setNotice(undefined);
     setItems((prev) => [...prev, userItem(text, fileAssets)]);
@@ -322,8 +447,9 @@ export function App() {
     const ctx = { startedAt: Date.now(), session: sessionId, preview: { opened: false } } as Parameters<typeof onRunEvent>[1];
     await streamRun((signal) =>
       api.run(
-        { agentId, sessionId, text, attachments, imageModel: agentId === "image-designer" ? imageModel || undefined : undefined, model: modelKey || undefined, thinkingLevel: effort || undefined },
+        { agentId, sessionId, projectId, text, attachments, imageModel: agentId === "image-designer" ? imageModel || undefined : undefined, model: modelKey || undefined, thinkingLevel: effort || undefined },
         (event) => {
+          if (signal.aborted || apiRef.current !== api || nav !== navigation.current) return;
           if (event.type === "run") onUploaded?.();
           onRunEvent(event, ctx);
         },
@@ -336,9 +462,9 @@ export function App() {
    * Reattaches to the session's unfinished run (it outlives a reload while it waits on a question):
    * its events from `next` on fold into the transcript just loaded, and its question comes back.
    */
-  async function resume(sid: string) {
+  async function resume(sid: string, isCurrent: () => boolean) {
     const live = await api.sessionRun(sid).catch(() => undefined);
-    if (!live) return;
+    if (!live || !isCurrent()) return;
     setRunId(live.runId);
     setQuestion(live.questions[0]);
     if (live.questions[0]) {
@@ -346,7 +472,10 @@ export function App() {
       setItems((prev) => prev.map((i) => (i.kind === "tool" && i.id === waitingId ? { ...i, status: "waiting", result: undefined } : i)));
     }
     const ctx = { session: sid, preview: { opened: false } } as Parameters<typeof onRunEvent>[1];
-    await streamRun((signal) => api.events(live.runId, live.next, (event) => onRunEvent(event, ctx), signal)).catch(() => {});
+    setLoadingSession(false);
+    void streamRun((signal) => api.events(live.runId, live.next, (event) => {
+      if (!signal.aborted && isCurrent()) onRunEvent(event, ctx);
+    }, signal)).catch(() => {});
   }
 
   async function answerQuestion(body: AskUserAnswer) {
@@ -430,13 +559,15 @@ export function App() {
     <Sidebar
       agents={agents}
       sessions={sessions}
-      sessionId={sessionId}
+      view={view}
+      onView={showView}
+      sessionId={view === "chat" ? sessionId : undefined}
       identity={identity}
       model={model}
       online={online}
       busy={busy && !question}
       runningSessionId={busy ? sessionId : undefined}
-      onNew={newChat}
+      onNew={() => newChat()}
       onOpen={(id) => void openSession(id)}
       onDelete={(session) => setModal({ kind: "delete", session })}
       onRename={(session, name) => void updateSession(session, { name })}
@@ -488,16 +619,44 @@ export function App() {
                 icon={<PanelLeft size={19} />}
                 onClick={() => setMobileNav(true)}
               />
-              {agent && (
-                <span className="top-agent">
-                  {agentIcon(agent.id, 15)}
-                  {agent.name}
-                </span>
+              {view !== "chat" ? (
+                <span className="top-session">{view === "projects" ? "项目" : "产物"}</span>
+              ) : (
+                <nav className="crumbs" aria-label="当前位置">
+                  {currentProject && (
+                    <>
+                      <button
+                        type="button"
+                        className="crumb"
+                        title={currentProject.name}
+                        onClick={() => {
+                          setView("projects");
+                          setOpenedProjectId(currentProject.id);
+                        }}
+                      >
+                        {currentProject.name}
+                      </button>
+                      <span className="top-sep" aria-hidden="true">/</span>
+                    </>
+                  )}
+                  {currentSession ? (
+                    <ChatTitleMenu
+                      key={currentSession.id}
+                      session={currentSession}
+                      title={sessionTitle(currentSession)}
+                      projects={projects}
+                      busy={busy && !question}
+                      onPin={(pinned) => void updateSession(currentSession, { pinned })}
+                      onRename={(name) => void updateSession(currentSession, { name })}
+                      onMove={(projectId) => void updateSession(currentSession, { projectId })}
+                      onCreateProject={() => setModal({ kind: "project", moveSession: currentSession })}
+                      onDelete={() => setModal({ kind: "delete", session: currentSession })}
+                    />
+                  ) : (
+                    <span className="top-session">{sessionId ? "当前会话" : "新会话"}</span>
+                  )}
+                </nav>
               )}
-              <span className="top-sep">/</span>
-              <span className="top-session">
-                {currentSession ? sessionTitle(currentSession) : sessionId ? "当前会话" : "新会话"}
-              </span>
             </div>
             <div className="top-right">
               <Button
@@ -507,7 +666,7 @@ export function App() {
                 icon={theme === "dark" ? <Moon size={17} /> : theme === "light" ? <Sun size={17} /> : <Monitor size={17} />}
                 onClick={() => setTheme(theme === "system" ? "light" : theme === "light" ? "dark" : "system")}
               />
-              {canPreview && (
+              {view === "chat" && canPreview && (
                 <Button
                   size="icon"
                   title="页面预览"
@@ -518,18 +677,40 @@ export function App() {
                   onClick={() => setPanel((p) => (p === "preview" ? null : "preview"))}
                 />
               )}
-              <Button
-                size="icon"
-                title="运行详情"
-                aria-label="运行详情"
-                aria-pressed={panel === "details"}
-                className={panel === "details" ? "active" : ""}
-                icon={<PanelRight size={17} />}
-                onClick={() => setPanel((p) => (p === "details" ? null : "details"))}
-              />
+              {view === "chat" && (
+                <Button
+                  size="icon"
+                  title="运行详情"
+                  aria-label="运行详情"
+                  aria-pressed={panel === "details"}
+                  className={panel === "details" ? "active" : ""}
+                  icon={<PanelRight size={17} />}
+                  onClick={() => setPanel((p) => (p === "details" ? null : "details"))}
+                />
+              )}
             </div>
           </header>
 
+          {view !== "chat" ? (
+            <div className="scroll-area page-scroll">
+              {view === "projects" ? (
+                <ProjectsView
+                  projects={projects}
+                  sessions={sessions}
+                  loading={projectsLoading}
+                  project={projects.find((p) => p.id === openedProjectId)}
+                  busy={busy && !question}
+                  onOpenProject={(project) => setOpenedProjectId(project?.id)}
+                  onCreate={() => setModal({ kind: "project" })}
+                  onEdit={(project) => setModal({ kind: "project", project })}
+                  onNewChat={(project) => newChat(project.id)}
+                  onOpenSession={(id) => void openSession(id)}
+                />
+              ) : (
+                <ArtifactsView api={api} agents={agents} busy={busy && !question} onOpen={(entry: ArtifactEntry) => void openSession(entry.sessionId)} />
+              )}
+            </div>
+          ) : (
           <div
             className="scroll-area"
             ref={scroll.containerRef}
@@ -570,10 +751,11 @@ export function App() {
               )}
             </div>
           </div>
+          )}
 
           <div className="composer-zone">
             <AnimatePresence>
-              {scroll.showJump && (
+              {view === "chat" && scroll.showJump && (
                 <motion.div
                   className="jump"
                   initial={{ opacity: 0, y: 6 }}
@@ -591,16 +773,16 @@ export function App() {
                 <Button size="icon" aria-label="关闭提示" icon={<X size={14} />} onClick={() => setNotice(undefined)} />
               </div>
             )}
-            {question && !isNewChat ? (
+            {view !== "chat" ? null : question && !isNewChat ? (
               <AskUserCard key={question.toolCallId} ask={question} agentName={agent?.name ?? "agent"} onAnswer={answerQuestion} />
             ) : (
-              !isNewChat && composerEl
+              !isNewChat && !loadingSession && composerEl
             )}
           </div>
         </main>
 
         <AnimatePresence>
-          {panel && (
+          {panel && view === "chat" && (
             <motion.div
               className={`details-wrap ${resizing ? "resizing" : ""}`}
               initial={{ width: 0, opacity: 0 }}
@@ -658,6 +840,15 @@ export function App() {
             setIdentity(next);
             setModal(undefined);
           }}
+          onClose={() => setModal(undefined)}
+        />
+      )}
+      {modal?.kind === "project" && (
+        <ProjectModal
+          api={api}
+          project={modal.project}
+          onSave={projectSaved}
+          onDelete={projectDeleted}
           onClose={() => setModal(undefined)}
         />
       )}

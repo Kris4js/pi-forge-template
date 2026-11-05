@@ -11,20 +11,25 @@ import (
 const ProtocolVersion = 1
 
 const (
-	MethodHello         = "runtime.hello"
-	MethodModelsList    = "models.list"
-	MethodRunStart      = "run.start"
-	MethodRunCancel     = "run.cancel"
-	MethodSessionList   = "session.list"
-	MethodSessionGet    = "session.get"
-	MethodSessionInfo   = "session.info"
-	MethodSessionDelete = "session.delete"
-	MethodSessionUpdate = "session.update"
-	MethodArtifactList  = "artifact.list"
-	MethodArtifactGet   = "artifact.get"
-	MethodToolAuthorize = "tool.authorize"
-	MethodUserAsk       = "user.ask"
-	MethodRunEvent      = "run.event"
+	MethodHello           = "runtime.hello"
+	MethodModelsList      = "models.list"
+	MethodRunStart        = "run.start"
+	MethodRunCancel       = "run.cancel"
+	MethodProjectList     = "project.list"
+	MethodProjectCreate   = "project.create"
+	MethodProjectUpdate   = "project.update"
+	MethodProjectDelete   = "project.delete"
+	MethodSessionList     = "session.list"
+	MethodSessionGet      = "session.get"
+	MethodSessionInfo     = "session.info"
+	MethodSessionDelete   = "session.delete"
+	MethodSessionUpdate   = "session.update"
+	MethodArtifactList    = "artifact.list"
+	MethodArtifactListAll = "artifact.listAll"
+	MethodArtifactGet     = "artifact.get"
+	MethodToolAuthorize   = "tool.authorize"
+	MethodUserAsk         = "user.ask"
+	MethodRunEvent        = "run.event"
 )
 
 // Application error codes returned by the runtime (JSON-RPC reserves negative codes).
@@ -55,6 +60,7 @@ type RunStartParams struct {
 	SessionScope
 	RunID     string   `json:"runId"`
 	SessionID string   `json:"sessionId,omitempty"`
+	ProjectID *string  `json:"projectId,omitempty"`
 	Input     RunInput `json:"input"`
 	// Model is a key from models.list; the runtime refuses models that are not registered.
 	Model         string `json:"model,omitempty"`
@@ -77,6 +83,18 @@ type RunStartResult struct {
 	SessionID string `json:"sessionId"`
 }
 
+type ProjectParams struct {
+	TenantParams
+	ProjectID    string  `json:"projectId,omitempty"`
+	Name         *string `json:"name,omitempty"`
+	Instructions *string `json:"instructions,omitempty"`
+}
+
+type SessionListParams struct {
+	TenantParams
+	ProjectID *string `json:"projectId,omitempty"`
+}
+
 type SessionParams struct {
 	TenantParams
 	SessionID string `json:"sessionId"`
@@ -87,12 +105,16 @@ type SessionUpdateParams struct {
 	SessionParams
 	Name   *string `json:"name,omitempty"`
 	Pinned *bool   `json:"pinned,omitempty"`
+	// ProjectID is a JSON string (move into that project) or null (remove from its project);
+	// omitted when the update does not touch the project.
+	ProjectID json.RawMessage `json:"projectId,omitempty"`
 }
 
 // SessionInfo names the agent a session is bound to (empty for a session without a binding).
 type SessionInfo struct {
-	ID      string `json:"id"`
-	AgentID string `json:"agentId,omitempty"`
+	ID        string `json:"id"`
+	AgentID   string `json:"agentId,omitempty"`
+	ProjectID string `json:"projectId,omitempty"`
 }
 
 type ArtifactParams struct {

@@ -1,11 +1,11 @@
 /*
  * DropdownMenu — ported from shadcn/ui (apps/v4/registry/bases/base/ui/dropdown-menu.tsx), built on
- * Base UI's headless Menu. Same parts and data-slot structure (submenus and checkbox items omitted
- * until needed); styling lives in ai-elements.css.
+ * Base UI's headless Menu. Same parts and data-slot structure (checkbox items omitted until needed);
+ * styling lives in ai-elements.css.
  * Copyright (c) 2023 shadcn — MIT License.
  */
 import { Menu as MenuPrimitive } from "@base-ui/react/menu";
-import { Check } from "lucide-react";
+import { Check, ChevronRight } from "lucide-react";
 import type { ComponentProps } from "react";
 
 // Base UI accepts className as a string or a function of the part's state; keep both forms.
@@ -112,6 +112,45 @@ function DropdownMenuShortcut({ className, ...props }: ComponentProps<"span">) {
   return <span data-slot="dropdown-menu-shortcut" className={["dropdown-menu-shortcut", className].filter(Boolean).join(" ")} {...props} />;
 }
 
+function DropdownMenuSub({ ...props }: MenuPrimitive.SubmenuRoot.Props) {
+  return <MenuPrimitive.SubmenuRoot data-slot="dropdown-menu-sub" {...props} />;
+}
+
+function DropdownMenuSubTrigger({ className, inset, children, ...props }: MenuPrimitive.SubmenuTrigger.Props & { inset?: boolean }) {
+  return (
+    <MenuPrimitive.SubmenuTrigger
+      data-slot="dropdown-menu-sub-trigger"
+      data-inset={inset}
+      className={cx("dropdown-menu-item sub-trigger", className)}
+      {...props}
+    >
+      {children}
+      <ChevronRight className="dropdown-menu-sub-chevron" />
+    </MenuPrimitive.SubmenuTrigger>
+  );
+}
+
+function DropdownMenuSubContent({
+  align = "start",
+  alignOffset = -4,
+  side = "right",
+  sideOffset = 4,
+  className,
+  ...props
+}: Parameters<typeof DropdownMenuContent>[0]) {
+  return (
+    <DropdownMenuContent
+      data-slot="dropdown-menu-sub-content"
+      className={cx("dropdown-menu-sub-content", className)}
+      align={align}
+      alignOffset={alignOffset}
+      side={side}
+      sideOffset={sideOffset}
+      {...props}
+    />
+  );
+}
+
 export {
   DropdownMenu,
   DropdownMenuContent,
@@ -123,5 +162,8 @@ export {
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuShortcut,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 };

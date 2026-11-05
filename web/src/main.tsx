@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import "@fontsource-variable/newsreader/opsz.css";
 import "./theme.css";
 import "./styles.css";
 import "./ai-elements.css";

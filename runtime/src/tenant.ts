@@ -34,6 +34,7 @@ export function assertScope(params: Partial<SessionScope>): SessionScope {
 }
 
 export type TenantPaths = {
+  tenant: Tenant;
   /** <data>/workspaces/<ws> */
   workspaceDir: string;
   /** <data>/workspaces/<ws>/AGENTS.md — workspace-wide instructions shared by every user and agent. */
@@ -50,6 +51,7 @@ export function tenantPaths(dataDir: string, tenant: Tenant): TenantPaths {
   const workspaceDir = join(resolve(dataDir), "workspaces", tenant.workspace);
   const userHome = join(workspaceDir, "users", tenant.userId);
   return {
+    tenant,
     workspaceDir,
     workspaceInstructions: join(workspaceDir, "AGENTS.md"),
     userHome,

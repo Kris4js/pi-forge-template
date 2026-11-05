@@ -1,5 +1,6 @@
-import { existsSync, statSync } from "node:fs";
-import { mkdir, open, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { createReadStream, existsSync, statSync } from "node:fs";
+import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { createInterface } from "node:readline";
 import { join, relative, isAbsolute } from "node:path";
 import { SessionManager, type SessionEntry } from "@earendil-works/pi-coding-agent";
 import { ATTACHMENT_NOTES, attachmentMimeType } from "../attachments.ts";
@@ -7,21 +8,68 @@ import { IMAGE_ENTRY } from "../image-assets.ts";
 import type { FileAsset, ImageAsset } from "../protocol.ts";
 import { ArtifactStore } from "../artifacts/store.ts";
 import { RpcError } from "../ipc/peer.ts";
-import { ErrorCodes, type SessionDetail, type SessionInfo, type SessionSummary, type TranscriptMessage } from "../protocol.ts";
+import { ErrorCodes, type ArtifactEntry, type SessionDetail, type SessionInfo, type SessionSummary, type TranscriptMessage } from "../protocol.ts";
 import type { TenantPaths } from "../tenant.ts";
+import { database } from "./database.ts";
+import { persistSession, restoreSession, type SessionRecord } from "./managed-session.ts";
 
-/**
- * Memory = pi's own session storage. No custom persistence or retention logic lives here:
- * - history: SessionManager JSONL files (pi session format), one directory per workspace/user/agent
- * - context window: pi auto-compaction (configured through SettingsManager in run.ts)
- * - durable instructions: pi context files (AGENTS.md), see run.ts
- * This module only maps tenant paths onto SessionManager and shapes transcripts for the UI.
- *
- * Sessions live at the user level, shared by all agents. Each records the agent it was started with
- * as a pi custom entry (not part of the LLM context), so it is always continued by that agent.
+/** Sessions keep pi's entry tree in either JSONL or the configured database.
+ * Agent and project bindings are custom entries, outside the model's context. The agent binding is
+ * fixed; the project binding may be re-appended (moved between projects), and the last one wins
+ * (`projectId: null` = no project).
  */
 
 const AGENT_ENTRY = "pi-forge.agent";
+const PROJECT_ENTRY = "pi-forge.project";
+
+/** The latest project binding of an entry list; undefined when unbound or removed. */
+function latestProject(entries: readonly SessionEntry[]): string | undefined {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const e = entries[i]!;
+    if (e.type === "custom" && e.customType === PROJECT_ENTRY) {
+      const projectId = (e.data as { projectId?: unknown } | undefined)?.projectId;
+      return typeof projectId === "string" ? projectId : undefined;
+    }
+  }
+  return undefined;
+}
+
+export function sessionProject(manager: SessionManager): string | undefined {
+  return latestProject(manager.getEntries());
+}
+
+export function bindProject(manager: SessionManager, projectId: string | null): void {
+  manager.appendCustomEntry(PROJECT_ENTRY, { projectId });
+}
+
+export async function storedSession(paths: TenantPaths, sessionId: string) {
+  if (!SESSION_ID.test(sessionId)) throw new RpcError(ErrorCodes.invalidParams, "invalid sessionId");
+  const record = await database!.get<SessionRecord>(paths, "session", sessionId);
+  if (!record) throw new RpcError(ErrorCodes.notFound, "session not found");
+  return record;
+}
+
+/** Summarize a stored record directly: no clone or tree index per listed session. */
+function summary(record: SessionRecord): SessionSummary {
+  let agentId: string | undefined;
+  let name: string | undefined;
+  let messageCount = 0;
+  let preview: string | undefined;
+  for (const e of record.entries) {
+    if (e.type === "message") {
+      messageCount++;
+      if (preview === undefined && e.message.role === "user") preview = textOf(e.message.content).slice(0, 120);
+    } else if (e.type === "session_info") name = e.name?.trim() || undefined;
+    else if (e.type === "custom" && agentId === undefined && e.customType === AGENT_ENTRY) {
+      const data = e.data as { agentId?: unknown } | undefined;
+      if (typeof data?.agentId === "string") agentId = data.agentId;
+    }
+  }
+  return {
+    id: record.header.id, agentId, projectId: latestProject(record.entries), name, pinned: record.pinned || undefined,
+    createdAt: record.header.timestamp, updatedAt: record.updatedAt, messageCount, preview: preview ?? "",
+  };
+}
 
 /** The agent a session is bound to, from its custom entry. */
 export function sessionAgent(manager: SessionManager): string | undefined {
@@ -38,48 +86,61 @@ export function bindAgent(manager: SessionManager, agentId: string): void {
   manager.appendCustomEntry(AGENT_ENTRY, { agentId });
 }
 
-/** Reads only the head of the file: the binding is written before the first prompt. */
-async function readAgentFromFile(path: string): Promise<string | undefined> {
-  const handle = await open(path, "r");
-  try {
-    const buffer = Buffer.alloc(64 * 1024);
-    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-    for (const line of buffer.subarray(0, bytesRead).toString("utf8").split("\n")) {
-      if (!line.includes(AGENT_ENTRY)) continue;
-      try {
-        const entry = JSON.parse(line) as { type?: string; customType?: string; data?: { agentId?: unknown } };
-        if (entry.type === "custom" && entry.customType === AGENT_ENTRY && typeof entry.data?.agentId === "string") {
-          return entry.data.agentId;
-        }
-      } catch {
-        // a line cut by the 64 KiB window
-      }
+type Bindings = { agentId?: string; projectId?: string };
+
+/**
+ * Streams the file without SessionManager.open() (which may rewrite old formats) and parses only the
+ * binding lines: the first agent binding, the last project binding.
+ */
+async function readBindingsFromFile(path: string): Promise<Bindings> {
+  const found: Bindings = {};
+  const lines = createInterface({ input: createReadStream(path, { encoding: "utf8" }), crlfDelay: Infinity });
+  for await (const line of lines) {
+    const agent = found.agentId === undefined && line.includes(AGENT_ENTRY);
+    if (!agent && !line.includes(PROJECT_ENTRY)) continue;
+    try {
+      const entry = JSON.parse(line) as { type?: string; customType?: string; data?: { agentId?: unknown; projectId?: unknown } };
+      if (entry.type !== "custom") continue;
+      if (agent && entry.customType === AGENT_ENTRY && typeof entry.data?.agentId === "string") found.agentId = entry.data.agentId;
+      if (entry.customType === PROJECT_ENTRY) found.projectId = typeof entry.data?.projectId === "string" ? entry.data.projectId : undefined;
+    } catch {
+      // not a complete entry line
     }
-    return undefined;
-  } finally {
-    await handle.close();
   }
+  return found;
 }
 
 const SESSION_ID = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/;
 
 export async function openSession(paths: TenantPaths, sessionId?: string): Promise<SessionManager> {
+  if (database) {
+    const stored = sessionId ? await storedSession(paths, sessionId) : undefined;
+    const manager = stored ? restoreSession(paths.userHome, stored.value) : SessionManager.inMemory(paths.userHome);
+    persistSession(paths, manager, stored?.version ?? 0, stored?.value.pinned);
+    return manager;
+  }
   await mkdir(paths.sessionDir, { recursive: true });
   if (!sessionId) return SessionManager.create(paths.userHome, paths.sessionDir);
   return SessionManager.open(await findSessionFile(paths, sessionId), paths.sessionDir, paths.userHome);
 }
 
 export async function listSessions(paths: TenantPaths): Promise<SessionSummary[]> {
+  if (database) {
+    const records = await database.list<SessionRecord>(paths, "session");
+    return records.map(summary)
+      .sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned) || b.updatedAt.localeCompare(a.updatedAt));
+  }
   if (!existsSync(paths.sessionDir)) return [];
   const sessions = await SessionManager.list(paths.userHome, paths.sessionDir);
-  const agents = await Promise.all(sessions.map((s) => readAgentFromFile(s.path).catch(() => undefined)));
+  const bindings = await Promise.all(sessions.map((s) => readBindingsFromFile(s.path).catch((): Bindings => ({}))));
   const pins = await readPins(paths);
   return sessions
-    .map((s, i) => ({ s, agentId: agents[i], pinned: pins.has(s.id) }))
+    .map((s, i) => ({ s, ...bindings[i], pinned: pins.has(s.id) }))
     .sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.s.modified.getTime() - a.s.modified.getTime())
-    .map(({ s, agentId, pinned }) => ({
+    .map(({ s, agentId, projectId, pinned }) => ({
       id: s.id,
       agentId,
+      projectId,
       pinned: pinned || undefined,
       name: s.name,
       createdAt: s.created.toISOString(),
@@ -90,48 +151,92 @@ export async function listSessions(paths: TenantPaths): Promise<SessionSummary[]
 }
 
 export async function getSession(paths: TenantPaths, sessionId: string): Promise<SessionDetail> {
-  const manager = SessionManager.open(await findSessionFile(paths, sessionId), paths.sessionDir, paths.userHome);
+  const manager = await openSession(paths, sessionId);
   return {
     id: manager.getSessionId(),
     agentId: sessionAgent(manager),
+    projectId: sessionProject(manager),
     name: manager.getSessionName(),
     messages: toTranscript(manager.getBranch(), paths.userHome),
   };
 }
 
 export async function getSessionInfo(paths: TenantPaths, sessionId: string): Promise<SessionInfo> {
-  return { id: sessionId, agentId: await readAgentFromFile(await findSessionFile(paths, sessionId)) };
+  if (database) {
+    const { agentId, projectId } = summary((await storedSession(paths, sessionId)).value);
+    return { id: sessionId, agentId, projectId };
+  }
+  return { id: sessionId, ...(await readBindingsFromFile(await findSessionFile(paths, sessionId))) };
+}
+
+/** Artifacts of the user's existing conversations: one entry per conversation, its latest revision. */
+export async function listAllArtifacts(paths: TenantPaths): Promise<ArtifactEntry[]> {
+  const sessions = await listSessions(paths);
+  const entries = await Promise.all(sessions.map(async (s): Promise<ArtifactEntry | undefined> => {
+    const revisions = await ArtifactStore.forSession(paths, s.id).list().catch(() => []);
+    const latest = revisions.at(-1);
+    if (!latest) return undefined;
+    const sessionName = (s.name || s.preview || "").replace(/\s+/g, " ").trim();
+    return { ...latest, sessionId: s.id, sessionName, agentId: s.agentId, projectId: s.projectId, revisions: revisions.length };
+  }));
+  return entries.filter((e): e is ArtifactEntry => !!e).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 export async function deleteSession(paths: TenantPaths, sessionId: string): Promise<void> {
-  await rm(await findSessionFile(paths, sessionId));
+  if (database) {
+    const stored = await storedSession(paths, sessionId);
+    await database.remove(paths, "session", sessionId, stored.version);
+  } else {
+    await rm(await findSessionFile(paths, sessionId));
+    await setPinned(paths, sessionId, false);
+  }
   await ArtifactStore.forSession(paths, sessionId).remove();
-  await setPinned(paths, sessionId, false);
 }
 
 const MAX_NAME = 80;
 
 /**
- * Rename appends pi's own session_info entry. It must not race a run on the same session: two
- * SessionManagers appending to one file would fork the entry tree, so busy sessions are refused.
+ * Rename appends pi's own session_info entry; a project move appends a new project binding (null
+ * removes it). Neither may race a run on the same session: two writers appending to one entry tree
+ * would fork it, so busy sessions are refused. The caller checks that a target project exists.
  */
 export async function updateSession(
   paths: TenantPaths,
   sessionId: string,
-  update: { name?: unknown; pinned?: unknown },
+  update: { name?: unknown; pinned?: unknown; projectId?: string | null },
   isBusy: (sessionKey: string) => boolean,
 ): Promise<void> {
-  const file = await findSessionFile(paths, sessionId);
+  let name: string | undefined;
   if (update.name !== undefined) {
-    const name = typeof update.name === "string" ? update.name.replace(/[\r\n]+/g, " ").trim() : "";
+    name = typeof update.name === "string" ? update.name.replace(/[\r\n]+/g, " ").trim() : "";
     if (!name || name.length > MAX_NAME) throw new RpcError(ErrorCodes.invalidParams, `name must be 1..${MAX_NAME} characters`);
-    if (isBusy(sessionKey(paths, sessionId))) throw new RpcError(ErrorCodes.conflict, "session is busy");
-    SessionManager.open(file, paths.sessionDir, paths.userHome).appendSessionInfo(name);
   }
-  if (update.pinned !== undefined) {
-    if (typeof update.pinned !== "boolean") throw new RpcError(ErrorCodes.invalidParams, "pinned must be a boolean");
-    await setPinned(paths, sessionId, update.pinned);
+  if (update.pinned !== undefined && typeof update.pinned !== "boolean") {
+    throw new RpcError(ErrorCodes.invalidParams, "pinned must be a boolean");
   }
+  const appends = name !== undefined || update.projectId !== undefined;
+  // With a database every write is versioned against the running session's own saves, pins included.
+  if ((appends || database) && isBusy(sessionKey(paths, sessionId))) throw new RpcError(ErrorCodes.conflict, "session is busy");
+  const apply = (manager: SessionManager) => {
+    if (name !== undefined) manager.appendSessionInfo(name);
+    if (update.projectId !== undefined && update.projectId !== (sessionProject(manager) ?? null)) bindProject(manager, update.projectId);
+  };
+  if (database) {
+    const stored = await storedSession(paths, sessionId);
+    if (appends) {
+      const manager = restoreSession(paths.userHome, stored.value);
+      apply(manager);
+      stored.value.entries = manager.getEntries();
+      stored.value.leafId = manager.getLeafId();
+    }
+    if (update.pinned !== undefined) stored.value.pinned = update.pinned as boolean;
+    stored.value.updatedAt = new Date().toISOString();
+    await database.put(paths, "session", sessionId, stored.value, stored.version);
+    return;
+  }
+  const file = await findSessionFile(paths, sessionId);
+  if (appends) apply(SessionManager.open(file, paths.sessionDir, paths.userHome));
+  if (update.pinned !== undefined) await setPinned(paths, sessionId, update.pinned as boolean);
 }
 
 export function sessionKey(paths: TenantPaths, sessionId: string): string {

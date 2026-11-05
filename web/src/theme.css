@@ -59,6 +59,8 @@
 
   --font-sans: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   --font-serif: "Songti SC", "Noto Serif CJK SC", "STSong", Georgia, serif;
+  /* Latin display face for the wordmark and page titles; CJK falls through to the serif stack. */
+  --font-display: "Newsreader Variable", "Songti SC", "Noto Serif CJK SC", Georgia, serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
   color-scheme: light;

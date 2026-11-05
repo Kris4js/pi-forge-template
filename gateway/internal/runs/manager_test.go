@@ -164,6 +164,34 @@ func TestAttachmentsForwardedToRuntime(t *testing.T) {
 	}
 }
 
+func TestProjectForwardedToRuntime(t *testing.T) {
+	project := "personal"
+	for _, projectID := range []*string{nil, &project} {
+		m, rt := newTestManager(Limits{RunTimeout: time.Minute})
+		run, err := m.Start(context.Background(), StartRequest{Principal: alice, Agent: agents.Manifest{ID: "a"}, SessionID: "s1", ProjectID: projectID, Text: "hi"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		finish(m, run)
+		rt.mu.Lock()
+		got := rt.started[0]
+		rt.mu.Unlock()
+		if got.ProjectID != projectID || got.SessionID != "s1" || got.Tenant != alice.Tenant {
+			t.Fatalf("project scope lost: %+v", got)
+		}
+		raw, err := json.Marshal(got)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]any
+		_ = json.Unmarshal(raw, &fields)
+		_, exists := fields["projectId"]
+		if exists != (projectID != nil) {
+			t.Fatalf("omitted project must stay omitted for session derivation: %s", raw)
+		}
+	}
+}
+
 var twoQuestions = []ipc.AskQuestion{
 	{Header: "One", Question: "Q?", Options: []string{"a", "b"}},
 	{Header: "Many", Question: "Which?", Options: []string{"x", "y", "z"}, MultiSelect: true},

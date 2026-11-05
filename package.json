@@ -10,6 +10,7 @@
   "scripts": {
     "check": "npm run check -w runtime && npm run check -w web",
     "test": "npm test -w runtime",
+    "migrate:storage": "node --import tsx runtime/src/memory/migrate.ts",
     "build": "npm run build -w web",
     "dev:web": "npm run dev -w web"
   }

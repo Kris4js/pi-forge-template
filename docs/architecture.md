@@ -9,12 +9,12 @@ gateway (Go, 1 个进程)
  └─ ipc.Supervisor ── stdin/stdout ──► runtime (Node + tsx, 1 个子进程)
                                          ├─ Runner：每个 run 一个 pi AgentSession，结束即 dispose
                                          ├─ governance 扩展：pi tool_call 钩子 → 沙箱 → tool.authorize
-                                         └─ pi SessionManager：JSONL 会话文件
+                                         └─ pi SessionManager：JSONL / SQLite / MySQL / PostgreSQL
 ```
 
 - **gateway 是唯一入口**。runtime 不监听端口，只通过 stdio 和 gateway 通信，stdout 专用于协议（SDK 或工具的 `console.log` 会被重定向到 stderr，再转进 gateway 日志）。
-- **runtime 不持有租户状态**。会话状态都在 pi 的 JSONL 文件里，每个 run 从文件重建 AgentSession，结束后释放。因此 runtime 可以随时重启：gateway 的 Supervisor 检测到退出后按退避重启，在途 run 统一以 `failed` 结束。
-- 一个 runtime 进程可以并发执行多个 run（全是异步 I/O）。以后要横向扩展，可以在 Supervisor 层改成进程池，按 `workspace` 做哈希分配，协议不用变。
+- **会话状态持久化到可配置的存储**。每个 run 从文件或数据库重建 AgentSession，结束前等待数据库写入，优雅停机先取消运行并排空写队列。进程崩溃时 gateway 将在途 run 标记为 `failed`，重启后恢复最后已持久化的条目。
+- 一个 runtime 可并发执行多个 run。当前会话忙锁、项目修改锁与审批均在进程内；SQL 版本检查防止旧快照覆盖，但不提供分布式 run 锁，不能直接将多个 gateway/runtime 当作可协调的集群。
 
 ## 职责边界
 
@@ -45,18 +45,22 @@ $FORGE_DATA_DIR/workspaces/<workspace>/
 
 延续旧服务的 `workspace / user` 两级租户模型，user 是最后一层：会话不按 agent 划分，侧栏列出用户的全部会话。每个会话在创建时用 pi 的 custom entry（`pi-forge.agent`，不进入 LLM 上下文）记录绑定的 agent：重新打开时由同一个 agent 继续，用其他 agent 续写会被 runtime 拒绝（409）；gateway 在列表、读取、删除和产物访问时按绑定的 agent 做 `policy.roles` 检查。
 
-## Memory：完全复用 pi 官方机制
+项目同样属于 `workspace + userId`。会话通过 `pi-forge.project` 条目绑定项目，后续不能通过 run 参数改归属。项目说明在每轮运行时通过 `agentsFilesOverride` 注入；同项目的不同对话仍保留独立历史。删除含会话或正在运行的项目返回 409。
 
-不再保留任何自研的记忆或留存逻辑（旧的 `retention.ts`：自己估算 token、按天数过期、`retention.json`、手动 compact，已全部删除）。
+数据库模式使用 `forge_records`，主键为 `(workspace, user_id, kind, id)`，保存项目或完整会话快照（header、entries、leafId、pinned、updatedAt）。每次追加条目排队写入，更新带版本条件，冲突或失败明确返回。MySQL 使用 utf8mb4_bin 保持身份大小写隔离；文件模式在大小写不敏感的文件系统上仍受文件路径语义限制。附件、产物和工作目录保留在文件系统。
+
+## Memory：pi 上下文与可插拔持久化
+
+上下文压缩和条目树继续交给 pi，不添加自研 token 估算、过期或压缩策略。
 
 | 能力 | pi 官方机制 | 使用方式 |
 |---|---|---|
-| 会话历史 | `SessionManager` JSONL（session format v3，树结构，支持分支） | `SessionManager.create / open / list`，按租户目录隔离 |
+| 会话历史 | `SessionManager` v3 条目树，支持分支 | 文件模式 create/open/list；SQL 模式 inMemory + 版本化快照，按租户主键隔离 |
 | 上下文窗口管理 | AgentSession auto-compaction | 通过 `SettingsManager.inMemory({ compaction: { enabled } })` 开关，由 pi 自己按 contextWindow 判断何时压缩 |
 | 长期指令 | context files（AGENTS.md） | 通过 `agentsFilesOverride` 显式注入 workspace 级 `AGENTS.md`（不使用向上目录遍历，避免跨租户读取） |
 | 会话展示 | `SessionManager.getBranch()` | 当前分支的消息，压缩点显示为摘要标记 |
 
-`runtime/src/memory/sessions.ts` 只是很薄的一层：把租户路径映射到 SessionManager，按 id 查找会话文件，以及给前端整理消息格式。
+`runtime/src/memory/sessions.ts` 负责存储选择和 transcript 映射；`database.ts` 统一三种 SQL 驱动；`managed-session.ts` 将数据库条目恢复到 pi 内存会话并管理写队列。由于 pi 没有公开的条目导入接口，恢复桥接使用固定版本 0.80.3 的内部索引构建方法，升级时需运行分支、压缩和恢复测试。`migrate.ts` 提供离线导入，保留源文件且不覆盖数据库已有记录。
 
 ## Agent 定义
 

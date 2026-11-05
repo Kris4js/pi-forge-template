@@ -1,16 +1,21 @@
-import { Anvil, Check, ChevronDown, MoreVertical, Pin, Plus, Search, Settings2, SlidersHorizontal, X } from "lucide-react";
+import { Check, ChevronDown, FolderClosed, MoreVertical, Pin, Plus, Search, Settings2, Shapes, SlidersHorizontal, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Agent, Identity, SessionSummary } from "../api";
 import { agentIcon } from "../lib/icons";
 import { Button, LiveDot } from "../ui";
 import { SessionMenu } from "./SessionMenu";
 
+export type MainView = "chat" | "projects" | "artifacts";
+
 const COLLAPSED_KEY = "pi-forge.history-collapsed";
+const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 
 type Props = {
   /** For the agent filter. */
   agents: Agent[];
   sessions: SessionSummary[];
+  view: MainView;
+  onView: (view: Exclude<MainView, "chat">) => void;
   sessionId?: string;
   /** The session a run is streaming in, if any. */
   runningSessionId?: string;
@@ -70,20 +75,42 @@ export function Sidebar(props: Props) {
   return (
     <div className="sidebar-inner">
       <div className="brand">
-        <span className="brand-mark">
-          <Anvil size={22} />
-        </span>
-        <strong>pi-forge</strong>
-        <span className="brand-en">CONSOLE</span>
+        <span className="brand-wordmark">pi-forge</span>
         {props.onClose && (
           <Button className="mobile-only" size="icon" aria-label="关闭侧栏" icon={<X size={18} />} onClick={props.onClose} />
         )}
       </div>
 
-      <Button className="new-chat" icon={<Plus size={17} />} disabled={busy} onClick={props.onNew}>
-        新会话
-        <kbd>⌘K</kbd>
-      </Button>
+      <nav className="side-nav" aria-label="主导航">
+        <button type="button" className="side-nav-item new" disabled={busy} onClick={props.onNew}>
+          <span className="side-nav-icon new-icon"><Plus size={15} strokeWidth={2.2} /></span>
+          <span className="side-nav-label">新会话</span>
+          <span className="shortcut" aria-label={IS_MAC ? "快捷键 Command K" : "快捷键 Ctrl K"}>
+            <kbd>{IS_MAC ? "⌘" : "Ctrl"}</kbd>
+            <kbd>K</kbd>
+          </span>
+        </button>
+        <button
+          type="button"
+          className={`side-nav-item ${props.view === "projects" ? "active" : ""}`}
+          aria-current={props.view === "projects" ? "page" : undefined}
+          disabled={busy}
+          onClick={() => props.onView("projects")}
+        >
+          <span className="side-nav-icon"><FolderClosed size={17} /></span>
+          <span className="side-nav-label">项目</span>
+        </button>
+        <button
+          type="button"
+          className={`side-nav-item ${props.view === "artifacts" ? "active" : ""}`}
+          aria-current={props.view === "artifacts" ? "page" : undefined}
+          disabled={busy}
+          onClick={() => props.onView("artifacts")}
+        >
+          <span className="side-nav-icon"><Shapes size={17} /></span>
+          <span className="side-nav-label">产物</span>
+        </button>
+      </nav>
 
       <label className="search">
         <Search size={15} />

@@ -52,6 +52,14 @@ export function prepareArtifactHtml(html: string, token: string): string | null 
   return DOCTYPE + csp + bootstrap(token) + document.slice(DOCTYPE.length);
 }
 
+/** Static thumbnail: the same network-blocking CSP, no bootstrap (thumbnails run in a script-less sandbox). */
+export function thumbnailArtifactHtml(html: string): string | null {
+  const document = html.trim().replace(/^<!doctype\s+html\s*>/i, DOCTYPE);
+  if (!document.startsWith(DOCTYPE)) return null;
+  const csp = `<meta http-equiv="Content-Security-Policy" content="${escapeAttribute(ARTIFACT_CSP)}">`;
+  return DOCTYPE + csp + document.slice(DOCTYPE.length);
+}
+
 /** Only plain https URLs may be opened, and only after the user confirms. */
 export function safeLinkUrl(value: unknown): string | null {
   if (typeof value !== "string" || value.length > 2048) return null;

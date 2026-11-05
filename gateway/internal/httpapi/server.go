@@ -51,10 +51,15 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/agents", s.authed(s.listAgents))
 	mux.Handle("GET /v1/image-models", s.authed(s.listImageModels))
 	mux.Handle("GET /v1/models", s.authed(s.listModels))
+	mux.Handle("GET /v1/projects", s.authed(s.listProjects))
+	mux.Handle("POST /v1/projects", s.authed(s.createProject))
+	mux.Handle("PATCH /v1/projects/{project}", s.authed(s.updateProject))
+	mux.Handle("DELETE /v1/projects/{project}", s.authed(s.deleteProject))
 	mux.Handle("GET /v1/sessions", s.authed(s.listSessions))
 	mux.Handle("GET /v1/sessions/{session}", s.authed(s.getSession))
 	mux.Handle("PATCH /v1/sessions/{session}", s.authed(s.updateSession))
 	mux.Handle("DELETE /v1/sessions/{session}", s.authed(s.deleteSession))
+	mux.Handle("GET /v1/artifacts", s.authed(s.listAllArtifacts))
 	mux.Handle("GET /v1/sessions/{session}/artifacts", s.authed(s.listArtifacts))
 	mux.Handle("GET /v1/sessions/{session}/artifacts/{revision}", s.authed(s.getArtifact))
 	mux.Handle("GET /v1/sessions/{session}/images/{image}", s.authed(s.getImage))
@@ -182,10 +187,21 @@ func (s *Server) session(r *http.Request, p auth.Principal) (ipc.SessionParams, 
 
 func (s *Server) listSessions(w http.ResponseWriter, r *http.Request, p auth.Principal) error {
 	var raw []json.RawMessage
-	if err := s.Runtime.Call(r.Context(), ipc.MethodSessionList, ipc.TenantParams{Tenant: p.Tenant}, &raw); err != nil {
+	params := ipc.SessionListParams{TenantParams: ipc.TenantParams{Tenant: p.Tenant}}
+	if r.URL.Query().Has("projectId") {
+		projectID := r.URL.Query().Get("projectId")
+		params.ProjectID = &projectID
+	}
+	if err := s.Runtime.Call(r.Context(), ipc.MethodSessionList, params, &raw); err != nil {
 		return err
 	}
-	// Only sessions of agents this principal may use (and that still exist) are listed.
+	writeJSON(w, http.StatusOK, s.visibleToPrincipal(p, raw))
+	return nil
+}
+
+// visibleToPrincipal keeps items (sessions or their artifacts) whose bound agent this principal may
+// use and that still exists; unbound items stay visible.
+func (s *Server) visibleToPrincipal(p auth.Principal, raw []json.RawMessage) []json.RawMessage {
 	visible := make([]json.RawMessage, 0, len(raw))
 	for _, item := range raw {
 		var head struct {
@@ -201,7 +217,16 @@ func (s *Server) listSessions(w http.ResponseWriter, r *http.Request, p auth.Pri
 		}
 		visible = append(visible, item)
 	}
-	writeJSON(w, http.StatusOK, visible)
+	return visible
+}
+
+// listAllArtifacts returns the latest artifact of each of the principal's visible conversations.
+func (s *Server) listAllArtifacts(w http.ResponseWriter, r *http.Request, p auth.Principal) error {
+	var raw []json.RawMessage
+	if err := s.Runtime.Call(r.Context(), ipc.MethodArtifactListAll, ipc.TenantParams{Tenant: p.Tenant}, &raw); err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, s.visibleToPrincipal(p, raw))
 	return nil
 }
 
@@ -226,20 +251,27 @@ func (s *Server) updateSession(w http.ResponseWriter, r *http.Request, p auth.Pr
 		return err
 	}
 	var body struct {
-		Name   *string `json:"name"`
-		Pinned *bool   `json:"pinned"`
+		Name      *string         `json:"name"`
+		Pinned    *bool           `json:"pinned"`
+		ProjectID json.RawMessage `json:"projectId"`
 	}
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
-	if err := dec.Decode(&body); err != nil || (body.Name == nil && body.Pinned == nil) {
-		return apiError{http.StatusBadRequest, "invalid_update", `body must set "name" and/or "pinned"`}
+	if err := dec.Decode(&body); err != nil || (body.Name == nil && body.Pinned == nil && body.ProjectID == nil) {
+		return apiError{http.StatusBadRequest, "invalid_update", `body must set "name", "pinned" and/or "projectId"`}
 	}
-	params := ipc.SessionUpdateParams{SessionParams: session, Name: body.Name, Pinned: body.Pinned}
+	if body.ProjectID != nil && string(body.ProjectID) != "null" {
+		var id string
+		if json.Unmarshal(body.ProjectID, &id) != nil || id == "" {
+			return apiError{http.StatusBadRequest, "invalid_update", `"projectId" must be a project id or null`}
+		}
+	}
+	params := ipc.SessionUpdateParams{SessionParams: session, Name: body.Name, Pinned: body.Pinned, ProjectID: body.ProjectID}
 	if err := s.Runtime.Call(r.Context(), ipc.MethodSessionUpdate, params, nil); err != nil {
 		return err
 	}
 	s.Log.Info("audit: session updated", "workspace", p.Tenant.Workspace, "user", p.Tenant.UserID, "session", session.SessionID,
-		"renamed", body.Name != nil, "pinned", body.Pinned)
+		"renamed", body.Name != nil, "pinned", body.Pinned, "project", string(body.ProjectID))
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	return nil
 }
@@ -298,6 +330,7 @@ func (s *Server) getArtifact(w http.ResponseWriter, r *http.Request, p auth.Prin
 type startRunBody struct {
 	AgentID     string           `json:"agentId"`
 	SessionID   string           `json:"sessionId,omitempty"`
+	ProjectID   *string          `json:"projectId,omitempty"`
 	Text        string           `json:"text"`
 	Attachments []ipc.Attachment `json:"attachments,omitempty"`
 	// Model is a key from GET /v1/models; ThinkingLevel one of its thinkingLevels.
@@ -346,7 +379,7 @@ func (s *Server) startRun(w http.ResponseWriter, r *http.Request, p auth.Princip
 		return err
 	}
 	run, err := s.Runs.Start(r.Context(), runs.StartRequest{
-		Principal: p, Agent: m, SessionID: body.SessionID, Text: body.Text, Attachments: body.Attachments, Model: body.Model, ImageModel: body.ImageModel, ThinkingLevel: body.ThinkingLevel,
+		Principal: p, Agent: m, SessionID: body.SessionID, ProjectID: body.ProjectID, Text: body.Text, Attachments: body.Attachments, Model: body.Model, ImageModel: body.ImageModel, ThinkingLevel: body.ThinkingLevel,
 	})
 	if err != nil {
 		return err

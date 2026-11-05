@@ -6,20 +6,20 @@
             HTTP / SSE                     JSON-RPC over stdio
  web (React) ──────────► gateway (Go) ◄──────────────────────► runtime (TS, pi-sdk)
                          认证 · 租户 · 准入                        AgentSession · 工具 · skills
-                         审批 · 超时 · 审计                        pi SessionManager (JSONL)
+                         审批 · 超时 · 审计                        pi SessionManager + 文件 / SQL 存储
 ```
 
 | 目录 | 职责 |
 |---|---|
 | [`gateway/`](gateway) | Go。HTTP API、API Key → 租户身份、agent 访问控制、工具调用决策（allow / ask / deny）、人工审批、并发配额、超时、审计日志；负责拉起并守护 runtime 进程 |
-| [`runtime/`](runtime) | TS。用 pi-coding-agent SDK 执行 run：加载 agent 定义、构建 AgentSession、流式事件回传；会话存储完全复用 pi 官方的 SessionManager 与 auto-compaction |
+| [`runtime/`](runtime) | TS。用 pi-coding-agent SDK 执行 run：加载 agent 定义、构建 AgentSession、流式事件回传；保留 pi SessionManager 条目树与 auto-compaction，支持文件、SQLite、MySQL、PostgreSQL 存储 |
 | [`agents/`](agents) | 业务 agent，每个目录一个，声明式定义（`agent.json` + `prompt.md` + 可选 `tools.ts` / `skills/`） |
 | [`web/`](web) | React + Vite 对话验证台：选择 agent、会话管理、流式输出、工具卡片、审批按钮 |
 | [`docs/`](docs) | [架构](docs/architecture.md)、[IPC 协议](docs/ipc-protocol.md) |
 
 ## 快速开始
 
-需要 Go ≥ 1.23、Node ≥ 22。
+需要 Go ≥ 1.23、Node ≥ 22.13（SQLite 使用 Node 内置 `node:sqlite`）。
 
 ```bash
 make install
@@ -47,6 +47,31 @@ ANTHROPIC_API_KEY=...
 
 单个 agent 也可以在 `agent.json` 的 `model` 字段里指定自己的模型。
 
+## 个人项目与对话存储
+
+侧栏可创建、编辑项目，并按全部、未分组或具体项目筛选对话。项目属于当前 `workspace + userId`，包含多个独立对话；项目说明在每次运行时注入模型上下文，更新后从下一轮生效。不同对话不自动共享聊天记录。新对话绑定当前项目，已有对话保持原归属和 agent；包含对话或正在运行的项目不能删除（409）。
+
+| 配置 | 用途 |
+|---|---|
+| `FORGE_STORAGE=file` | 默认值，保留原有 JSONL 和 pins.json；项目保存为用户目录下的 projects/*.json |
+| `FORGE_STORAGE=sqlite` | 历史、置顶、项目写入 SQLite，默认 `.data/conversations.sqlite`，可用 `FORGE_SQLITE_PATH` 指定 |
+| `FORGE_STORAGE=mysql` | 配合 `FORGE_DATABASE_URL=mysql://user:password@host:3306/database` |
+| `FORGE_STORAGE=pgsql` | 配合 `FORGE_DATABASE_URL=postgresql://user:password@host:5432/database`；也接受 postgres / postgresql |
+
+MySQL / PostgreSQL 数据库需预先创建，runtime 启动时创建 `forge_records` 表。每条记录以 workspace、user、kind、id 隔离，保存完整 pi 条目树和版本号；并发版本冲突拒绝覆盖。配置错误或数据库不可达时启动失败，不回退到文件。数据库模式不写会话 JSONL、项目 JSON 或 pins.json；附件、图片、HTML 产物和工具工作目录仍在 `FORGE_DATA_DIR`，备份时需同时保留。
+
+切换存储不会自动导入历史。迁移步骤：停止 gateway，备份数据，在仓库根目录配置目标 `FORGE_STORAGE` 和数据库连接，然后运行：
+
+```bash
+npm run migrate:storage
+```
+
+命令导入 `FORGE_DATA_DIR` 中的 pi v3 会话、置顶及项目，保留原始条目 ID，不修改或删除源文件；重复执行跳过数据库中已有记录。失败可修复原因后重跑。完成后以相同配置启动 gateway。改回 `file` 只能看到原文件中的历史，数据库新增内容不会自动反向同步。
+
+当前仍采用单 gateway/runtime 运行模型；数据库适配不包含跨实例 run 锁、分布式审批或附件对象存储。SDK 恢复桥接固定到 pi 0.80.3 的内部索引接口，升级 SDK 时必须运行恢复测试。SQLite 在部分 Node 版本会提示实验性 API。
+
+真实数据库回归测试可配置 `FORGE_TEST_MYSQL_URL` / `FORGE_TEST_PGSQL_URL` 后运行 `npm test`；仅对专用测试数据库使用这两个变量。未配置时对应测试跳过。
+
 ## 内置验证 agent
 
 | agent | 验证点 |
@@ -67,12 +92,15 @@ ANTHROPIC_API_KEY=...
 | GET | `/v1/me` | 当前身份与 runtime 信息 |
 | GET | `/v1/agents` | 当前身份可用的 agent |
 | GET | `/v1/models` | `.env` 注册的模型（`PI_MODEL_ID` + `PI_MODEL_IDS`）与可选思考强度；run 只能用这里的模型 |
-| GET | `/v1/sessions` | 用户的全部会话（跨 agent，每项带绑定的 `agentId`） |
+| GET / POST | `/v1/projects` | 项目列表 / 创建 `{"name","instructions?"}` |
+| PATCH / DELETE | `/v1/projects/{project}` | 更新 `{"name?","instructions?"}` / 删除空项目 |
+| GET | `/v1/sessions` | 用户的全部会话（每项带 `agentId`、可选 `projectId`）；可用 `?projectId=...` 筛选 |
 | GET / DELETE | `/v1/sessions/{session}` | 会话记录 / 删除 |
-| PATCH | `/v1/sessions/{session}` | `{"name"?, "pinned"?}`：重命名（pi `session_info` 条目，运行中的会话返回 409）/ 置顶（用户级偏好 `pins.json`） |
+| PATCH | `/v1/sessions/{session}` | `{"name"?, "pinned"?, "projectId"?}`：重命名 / 置顶 / 移入项目（字符串）或移出项目（`null`），下一轮起使用新项目指令；运行中不允许重命名或改项目，数据库模式下运行中置顶也返回 409 |
+| GET | `/v1/artifacts` | 当前用户所有会话的最新页面（每会话一条），按可用 agent 过滤 |
 | GET | `/v1/sessions/{session}/artifacts` | 会话的 HTML 页面版本列表 |
 | GET | `/v1/sessions/{session}/artifacts/{revision\|latest}` | 某个版本，JSON（`html` 字段），从不以 text/html 返回 |
-| POST | `/v1/runs` | `{"agentId","sessionId?","text","model?","thinkingLevel?","stream?"}`，默认返回 SSE |
+| POST | `/v1/runs` | `{"agentId","sessionId?","projectId?","text","model?","thinkingLevel?","stream?"}`，默认返回 SSE |
 | GET | `/v1/runs/{run}/events?from=N` | 重放 / 续接事件流 |
 | POST | `/v1/runs/{run}/cancel` | 取消 |
 | POST | `/v1/runs/{run}/approvals/{toolCallId}` | `{"decision":"approve"\|"reject"}` |
