@@ -1,4 +1,4 @@
-import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { AgentManifest, ThinkingLevel } from "../agents/manifest.ts";
 import { RpcError } from "../ipc/peer.ts";
@@ -14,7 +14,7 @@ const DEFAULT_LEVEL: ThinkingLevel = "medium";
 export type ModelDefaults = { provider: string; modelId: string; thinkingLevel?: ThinkingLevel };
 
 /**
- * Process-wide pi auth + model registry, configured once from env. The console may pick any model
+ * Process-wide pi auth + model runtime, configured once from env. The console may pick any model
  * registered here (and nothing else):
  *   PI_MODEL_ID       the default model (required)
  *   PI_MODEL_IDS      more models on the same endpoint / provider, comma-separated (optional)
@@ -22,13 +22,18 @@ export type ModelDefaults = { provider: string; modelId: string; thinkingLevel?:
  *   PI_MODEL_PROVIDER a pi built-in provider (keys from its usual env vars)
  */
 export class Models {
-  readonly authStorage = AuthStorage.inMemory();
-  readonly registry = ModelRegistry.inMemory(this.authStorage);
+  readonly runtime: ModelRuntime;
   readonly defaults: ModelDefaults;
   /** Allowed models, by key "<provider>/<id>". */
   private readonly allowed = new Map<string, Model<any>>();
 
-  constructor(env: NodeJS.ProcessEnv = process.env) {
+  private constructor(runtime: ModelRuntime, defaults: ModelDefaults, allowed: Map<string, Model<any>>) {
+    this.runtime = runtime;
+    this.defaults = defaults;
+    this.allowed = allowed;
+  }
+
+  static async create(env: NodeJS.ProcessEnv = process.env): Promise<Models> {
     const provider = read(env.PI_MODEL_PROVIDER)?.toLowerCase();
     const baseUrl = read(env.PI_MODEL_BASE_URL);
     const modelId = read(env.PI_MODEL_ID);
@@ -47,11 +52,14 @@ export class Models {
       );
     }
 
+    const runtime = await ModelRuntime.create({ modelsPath: null });
+    let defaults: ModelDefaults;
+
     if (baseUrl || provider === CUSTOM_PROVIDER) {
       if (!baseUrl) throw new Error("PI_MODEL_PROVIDER=custom requires PI_MODEL_BASE_URL");
       const protocol = read(env.PI_MODEL_PROTOCOL) ?? "openai-completions";
       if (!CUSTOM_PROTOCOLS.has(protocol)) throw new Error(`unsupported PI_MODEL_PROTOCOL: ${protocol}`);
-      this.registry.registerProvider(CUSTOM_PROVIDER, {
+      runtime.registerProvider(CUSTOM_PROVIDER, {
         baseUrl,
         apiKey: "PI_MODEL_API_KEY",
         api: protocol as Api,
@@ -65,18 +73,21 @@ export class Models {
           maxTokens: Number(env.PI_MODEL_MAX_TOKENS ?? 32768),
         })),
       });
-      if (apiKey) this.authStorage.setRuntimeApiKey(CUSTOM_PROVIDER, apiKey);
-      this.defaults = { provider: CUSTOM_PROVIDER, modelId, thinkingLevel };
+      if (apiKey) await runtime.setRuntimeApiKey(CUSTOM_PROVIDER, apiKey);
+      defaults = { provider: CUSTOM_PROVIDER, modelId, thinkingLevel };
     } else {
-      if (apiKey) this.authStorage.setRuntimeApiKey(provider!, apiKey);
-      this.defaults = { provider: provider!, modelId, thinkingLevel };
+      if (apiKey) await runtime.setRuntimeApiKey(provider!, apiKey);
+      defaults = { provider: provider!, modelId, thinkingLevel };
     }
 
+    const allowed = new Map<string, Model<any>>();
     for (const id of modelIds) {
-      const model = this.registry.find(this.defaults.provider, id);
-      if (!model) throw new Error(`model not found: ${this.defaults.provider}/${id}`);
-      this.allowed.set(Models.key(model), model);
+      const model = runtime.getModel(defaults.provider, id);
+      if (!model) throw new Error(`model not found: ${defaults.provider}/${id}`);
+      allowed.set(Models.key(model), model);
     }
+
+    return new Models(runtime, defaults, allowed);
   }
 
   static key(model: Pick<Model<any>, "provider" | "id">): string {
@@ -137,7 +148,7 @@ export class Models {
     const provider = manifest.model?.provider ?? this.defaults.provider;
     const modelId = manifest.model?.id ?? (manifest.model?.provider ? undefined : this.defaults.modelId);
     if (!modelId) throw new Error(`agent ${manifest.id}: model.id is required when model.provider is set`);
-    const model = this.registry.find(provider, modelId);
+    const model = this.runtime.getModel(provider, modelId);
     if (!model) throw new Error(`model not found: ${provider}/${modelId}`);
     return { model, thinkingLevel };
   }

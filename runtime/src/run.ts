@@ -9,8 +9,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { ASK_USER, askUserTool } from "./agents/ask-user.ts";
 import type { AgentCatalog, AgentManifest } from "./agents/manifest.ts";
-import { generateImages, imageConfig } from "./model/images.ts";
-import { getImageAsset, IMAGE_ENTRY } from "./image-assets.ts";
+import { IMAGE_ENTRY } from "./image-assets.ts";
 import { saveAttachments, validateAttachments } from "./attachments.ts";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import { ArtifactStore } from "./artifacts/store.ts";
@@ -120,6 +119,7 @@ export class Runner {
       const settingsManager = SettingsManager.inMemory({
         compaction: { enabled: agent.manifest.memory?.compaction ?? true },
         retry: { enabled: true, maxRetries: 2 },
+        images: { autoResize: false },
       });
       const resourceLoader = new DefaultResourceLoader({
         cwd: paths.userHome,
@@ -160,36 +160,12 @@ export class Runner {
         model: params.model,
         thinkingLevel: params.thinkingLevel,
       });
-      const selectedImageModel = params.imageModel ?? imageConfig().defaultModel;
-      if (params.imageModel && !imageConfig().models.includes(params.imageModel)) throw new RpcError(ErrorCodes.invalidParams, "图片模型未注册");
-      let requestedImages = 0;
       const customTools = agent.toolsFactory?.({
         tenant: scope.tenant,
         agentId: scope.agentId,
         agentDir: agent.dir,
         userHome: paths.userHome,
         sessionId: sessionManager.getSessionId(),
-        generateImages: async (value, signal) => {
-          const count = value.count ?? 1;
-          if (!Number.isInteger(count) || count < 1 || count > 10 || requestedImages + count > 30) throw new RpcError(ErrorCodes.invalidParams, "单次最多 10 张，每轮累计最多请求 30 张图片");
-          if ((value.referenceIds?.length ?? 0) > 20) throw new RpcError(ErrorCodes.invalidParams, "最多使用 20 张参考图");
-          // Reserve before awaiting: one tool call may request several screens in parallel.
-          requestedImages += count;
-          let refs;
-          try {
-            refs = await Promise.all((value.referenceIds ?? []).map((id) => getImageAsset(paths.userHome, sessionManager.getSessionId(), id)));
-            signal?.throwIfAborted();
-          } catch (error) {
-            requestedImages -= count;
-            throw error;
-          }
-          return generateImages(selectedImageModel, value, refs, signal);
-        },
-        publishImages: async (value) => {
-          const files = validateAttachments(value);
-          if (files.some((file) => !file.mimeType.startsWith("image/"))) throw new RpcError(ErrorCodes.invalidParams, "仅能发布图片");
-          return (await saveAttachments(paths.userHome, files, sessionManager.getSessionId())).assets;
-        },
         artifacts: ArtifactStore.forSession(paths, sessionManager.getSessionId()),
       }) ?? [];
       // Built-in runtime tools are opted into per agent through the manifest allowlist.
@@ -203,8 +179,7 @@ export class Runner {
       ({ session } = await createAgentSession({
         cwd: paths.userHome,
         agentDir: paths.userHome,
-        authStorage: this.deps.models.authStorage,
-        modelRegistry: this.deps.models.registry,
+        modelRuntime: this.deps.models.runtime,
         model,
         thinkingLevel,
         tools: agent.manifest.tools ?? [],
@@ -219,7 +194,6 @@ export class Runner {
       }
       const saved = await saveAttachments(paths.userHome, attachments, session.sessionId);
       text += saved.text;
-      if (saved.assets.length) text += `\n图片资产 ID（编辑时使用 referenceIds）：${JSON.stringify(saved.assets)}`;
       const files = attachments.filter((file) => !file.mimeType.startsWith("image/")).map((file) => ({ name: file.name, mimeType: file.mimeType, size: Buffer.byteLength(file.data, "base64") }));
       // Lets the transcript show what the user typed plus attachment cards instead of the expanded prompt.
       if (saved.assets.length || files.length) sessionManager.appendCustomEntry(IMAGE_ENTRY, { text: params.input.text, promptText: text, images: saved.assets, files });

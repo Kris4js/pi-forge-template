@@ -1,5 +1,4 @@
 import { resolve } from "node:path";
-import { imageConfig } from "./model/images.ts";
 import { getImageAsset } from "./image-assets.ts";
 import { AgentCatalog } from "./agents/manifest.ts";
 import { ArtifactStore } from "./artifacts/store.ts";
@@ -42,7 +41,7 @@ const agentsDir = resolve(process.env.FORGE_AGENTS_DIR ?? "agents");
 const dataDir = resolve(process.env.FORGE_DATA_DIR ?? ".data");
 let models: Models;
 try {
-  models = new Models();
+  models = await Models.create();
   await configureStorage(dataDir);
 } catch (error) {
   // Fatal configuration error: say why and exit non-zero so the gateway surfaces it.
@@ -69,10 +68,6 @@ peer.handle(Methods.imageGet, async (params: SessionGetParams & { id: string }) 
   const sessionId = requireSessionId(params);
   await getSessionInfo(paths, sessionId);
   return getImageAsset(paths.userHome, sessionId, params.id);
-});
-peer.handle(Methods.imageModelsList, () => {
-  const { models, defaultModel, key } = imageConfig();
-  return { models, defaultModel, configured: Boolean(key && models.length) };
 });
 peer.handle(Methods.modelsList, () => models.list());
 peer.handle(Methods.runStart, (params: RunStartParams) => withUserLock(scopePaths(params), () => runner.start(params)));

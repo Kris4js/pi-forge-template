@@ -49,7 +49,6 @@ func (s *Server) Handler() http.Handler {
 	})
 	mux.Handle("GET /v1/me", s.authed(s.me))
 	mux.Handle("GET /v1/agents", s.authed(s.listAgents))
-	mux.Handle("GET /v1/image-models", s.authed(s.listImageModels))
 	mux.Handle("GET /v1/models", s.authed(s.listModels))
 	mux.Handle("GET /v1/projects", s.authed(s.listProjects))
 	mux.Handle("POST /v1/projects", s.authed(s.createProject))
@@ -335,7 +334,6 @@ type startRunBody struct {
 	Attachments []ipc.Attachment `json:"attachments,omitempty"`
 	// Model is a key from GET /v1/models; ThinkingLevel one of its thinkingLevels.
 	Model         string `json:"model,omitempty"`
-	ImageModel    string `json:"imageModel,omitempty"`
 	ThinkingLevel string `json:"thinkingLevel,omitempty"`
 	// Stream defaults to true (SSE). false waits for the run and returns JSON.
 	Stream *bool `json:"stream,omitempty"`
@@ -345,15 +343,6 @@ type startRunBody struct {
 func (s *Server) listModels(w http.ResponseWriter, r *http.Request, p auth.Principal) error {
 	var out json.RawMessage
 	if err := s.Runtime.Call(r.Context(), ipc.MethodModelsList, struct{}{}, &out); err != nil {
-		return err
-	}
-	writeRaw(w, http.StatusOK, out)
-	return nil
-}
-
-func (s *Server) listImageModels(w http.ResponseWriter, r *http.Request, p auth.Principal) error {
-	var out json.RawMessage
-	if err := s.Runtime.Call(r.Context(), "images.models", struct{}{}, &out); err != nil {
 		return err
 	}
 	writeRaw(w, http.StatusOK, out)
@@ -379,7 +368,7 @@ func (s *Server) startRun(w http.ResponseWriter, r *http.Request, p auth.Princip
 		return err
 	}
 	run, err := s.Runs.Start(r.Context(), runs.StartRequest{
-		Principal: p, Agent: m, SessionID: body.SessionID, ProjectID: body.ProjectID, Text: body.Text, Attachments: body.Attachments, Model: body.Model, ImageModel: body.ImageModel, ThinkingLevel: body.ThinkingLevel,
+		Principal: p, Agent: m, SessionID: body.SessionID, ProjectID: body.ProjectID, Text: body.Text, Attachments: body.Attachments, Model: body.Model, ThinkingLevel: body.ThinkingLevel,
 	})
 	if err != nil {
 		return err

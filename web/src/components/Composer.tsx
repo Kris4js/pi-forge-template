@@ -3,8 +3,6 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "re
 import { createPortal } from "react-dom";
 import type { Agent, ModelsResult } from "../api";
 import { agentIcon } from "../lib/icons";
-import type { ImageModels } from "../api";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "./ui/dropdown-menu";
 import { AttachmentButton, AttachmentPreview, attachmentError, pastedFiles } from "./AttachmentButton";
 import { ModelSelector } from "./ModelSelector";
 import { Button } from "../ui";
@@ -21,9 +19,6 @@ type Props = {
   effort?: string;
   onModel?: (key: string) => void;
   onEffort?: (level: string) => void;
-  imageModels?: ImageModels;
-  imageModel?: string;
-  onImageModel?: (model: string) => void;
   busy: boolean;
   placeholder?: string;
   autoFocus?: boolean;
@@ -32,7 +27,7 @@ type Props = {
 };
 
 export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
-  { agent, catalog, model, effort, onModel, onEffort, imageModels, imageModel, onImageModel, busy, placeholder, autoFocus, onSend, onStop },
+  { agent, catalog, model, effort, onModel, onEffort, busy, placeholder, autoFocus, onSend, onStop },
   ref,
 ) {
   const [text, setText] = useState("");
@@ -126,14 +121,6 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       <div className="composer-tools">
         <div className="composer-left">
           <AttachmentButton files={files} onChange={setFiles} onError={setError} disabled={!agent || busy || sending} />
-          {agent?.id === "image-designer" && <DropdownMenu>
-            <DropdownMenuTrigger className="selector-trigger" aria-label="图片模型" title={imageModel || "请配置 PI_IMAGE_MODEL_ID 和 PI_IMAGE_API_KEY"} disabled={!imageModels?.configured}>
-              <span className="selector-label">{imageModel?.split("/").at(-1) || "图片模型未配置"}</span>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent side="top" align="start"><DropdownMenuRadioGroup value={imageModel ?? ""} onValueChange={(value) => onImageModel?.(String(value))}>
-              {imageModels?.models.map((id) => <DropdownMenuRadioItem key={id} value={id} closeOnClick>{id}</DropdownMenuRadioItem>)}
-            </DropdownMenuRadioGroup></DropdownMenuContent>
-          </DropdownMenu>}
           {agent && (
             <span className="chip" title={agent.description}>
               {agentIcon(agent.id, 13)}

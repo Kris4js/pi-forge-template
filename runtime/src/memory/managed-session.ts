@@ -14,7 +14,7 @@ type Pending = { flush: () => Promise<void> };
 const pending = new WeakMap<SessionManager, Pending>();
 
 /**
- * pi 0.80.3 has no public import-from-entries API. Keep this small, version-pinned bridge here:
+ * pi has no public import-from-entries API. Keep this small, version-pinned bridge here:
  * replay the original entries through its index builder without creating temporary JSONL files.
  * Tests cover IDs, branches, labels, compaction and context after restoring.
  */

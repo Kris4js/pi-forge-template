@@ -1,5 +1,12 @@
 # pi-forge
 
+![Go](https://img.shields.io/badge/Go-00ADD8?logo=go&logoColor=white)
+![Node.js](https://img.shields.io/badge/Node.js-339933?logo=nodedotjs&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)
+![React](https://img.shields.io/badge/React-20232A?logo=react&logoColor=61DAFB)
+![Vite](https://img.shields.io/badge/Vite-646CFF?logo=vite&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3776AB?logo=python&logoColor=white)
+
 基于 [pi SDK](https://github.com/earendil-works/pi-mono) 的多租户 agent 平台底座。仓库组织参考 [claude-quickstarts](https://github.com/anthropics/claude-quickstarts)：一套通用基础设施，加上一组按业务划分、可独立验证的 agent。
 
 ```
@@ -68,7 +75,7 @@ npm run migrate:storage
 
 命令导入 `FORGE_DATA_DIR` 中的 pi v3 会话、置顶及项目，保留原始条目 ID，不修改或删除源文件；重复执行跳过数据库中已有记录。失败可修复原因后重跑。完成后以相同配置启动 gateway。改回 `file` 只能看到原文件中的历史，数据库新增内容不会自动反向同步。
 
-当前仍采用单 gateway/runtime 运行模型；数据库适配不包含跨实例 run 锁、分布式审批或附件对象存储。SDK 恢复桥接固定到 pi 0.80.3 的内部索引接口，升级 SDK 时必须运行恢复测试。SQLite 在部分 Node 版本会提示实验性 API。
+当前仍采用单 gateway/runtime 运行模型；数据库适配不包含跨实例 run 锁、分布式审批或附件对象存储。SDK 恢复桥接适配至 pi SessionManager 内部索引接口，升级 SDK 时必须运行恢复测试。SQLite 在部分 Node 版本会提示实验性 API。
 
 真实数据库回归测试可配置 `FORGE_TEST_MYSQL_URL` / `FORGE_TEST_PGSQL_URL` 后运行 `npm test`；仅对专用测试数据库使用这两个变量。未配置时对应测试跳过。
 
@@ -147,28 +154,3 @@ uv pip install --python .venv/bin/python -r packages/documents/requirements.txt
 每个 runtime 同时只允许一个解析子进程，繁忙时明确拒绝；单次发送全部附件解析最多 20 秒，超时杀掉子进程。单文件及本次附件提取文本合计上限 100000 字符，超限要求拆分而非截断。PDF 最多 200 页；Excel 最多 50 个工作表、100000 单元格；Office ZIP 最多 5000 项、64 MiB 声明解压体积。加密文件和带 VBA 的文件拒绝处理。Excel 不重算公式（使用已有缓存值），PPTX/复杂 PDF 不保证表格和布局还原，图片文字不做 OCR。
 
 子进程使用最小环境、不继承 API 密钥、禁用插件及 Python socket 联网，Linux 限制 2 GiB 虚拟地址空间、CPU 30 秒。这是资源与网络访问防护，不是完整操作系统安全沙箱；公网不可信文档生产环境仍应结合容器权限/网络限制。失败时已保存的附件可能保留，暂不自动清理。
-
-## 图片生成与编辑（OpenRouter）
-
-在 `.env` 中单独配置图片接口，密钥不发送到浏览器：
-
-```dotenv
-PI_IMAGE_URL=https://openrouter.ai/api/v1/images
-PI_IMAGE_API_KEY=你的OpenRouter密钥
-PI_IMAGE_MODEL_ID=你的图片模型ID
-PI_IMAGE_MODEL_IDS=另一个图片模型ID,第三个图片模型ID
-```
-
-重启服务，选择「电商详情页」，在输入框左下方选择已注册图片模型。右侧原有模型仍是负责理解需求、调用工具的聊天模型。输入生成要求，或上传参考图并描述编辑目标；`generate_images` 默认需要审批，批准后才发起付费请求。生成结果复用轮播、预览、下载及会话历史。仅列出环境变量允许的模型，不会把平台所有模型自动开放。
-
-接口使用 OpenRouter 专用 `POST /api/v1/images`，编辑通过 `input_references` 的 data URL 提供本会话资产；不是 `/images/generations` 或 `/images/edits`。可用模型及能力见 https://openrouter.ai/api/v1/images/models ，协议见 https://openrouter.ai/docs/guides/overview/multimodal/image-generation 。模型需支持所选比例、图片数量和参考图；兼容性错误如实返回，不自动降级或重试。
-
-### 电商详情页工作流
-
-参考 [1click-ecom-detailpage](https://github.com/coolqoo/1click-ecom-detailpage) 的购买驱动诊断、购买理由卡、视觉风格锁和逐屏提示词流程，按本服务的工具能力重新编写提示词，未直接安装其脚本或复制完整 Skill。默认中文、5 张详情图规划，整组通过一次工具审批后并行生成，不强制先出首屏样张；仅用户要求时分阶段确认，超过单次 10 张时分批调用并分别审批；面向海外市场时按目标语言本地化。缺少真实评价或对比证据时改用产品细节或 FAQ，不沿用参考项目的模拟评价/数据默认行为。
-
-界面显示名为「电商详情页」，内部 ID 保留 `image-designer`，兼容已有会话和图片模型选择。交付为详情分屏图片，不是 HTML 网页。修改定义后重启服务；旧会话沿用历史上下文，新会话更适合使用新流程。
-
-首版非流式，图片请求最多等待 240 秒，电商详情页每轮总超时为 3 小时（含审批等待）。每轮累计最多请求 30 张、单次最多 10 张，更多分批；失败的已发出请求同样占用预算。上传和参考图最多 20 张，单张 4 MiB、附件合计 80 MiB，超限明确失败，不自动压缩；已完成生成仍可能产生费用。停止通过 AbortSignal 断开请求，不保证供应商停止计算。图片费用尚未合并进聊天 token 用量显示。不会自动重试生成，但 Agent 是否再次调用仍由模型决定，重复审批时应检查参数。
-
-尚未配置真实 OpenRouter 密钥进行生图验收，自动测试使用兼容服务测试桩。此前 Magpie 实测报错找不到配置的图片模型，现不再依赖 Magpie 或 MCP。

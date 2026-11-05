@@ -1,7 +1,7 @@
 import { AnimatePresence, motion, MotionConfig } from "framer-motion";
 import { AppWindow, ArrowDown, Monitor, Moon, PanelLeft, PanelRight, Sun, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { Api, type Agent, type ArtifactEntry, type ArtifactSummary, type Identity, type ImageModels, type ModelsResult, type PendingQuestion, type Project, type RunEvent, type SessionSummary } from "./api";
+import { Api, type Agent, type ArtifactEntry, type ArtifactSummary, type Identity, type ModelsResult, type PendingQuestion, type Project, type RunEvent, type SessionSummary } from "./api";
 import { Composer, type ComposerHandle } from "./components/Composer";
 import { DetailsPanel } from "./components/DetailsPanel";
 import { PreviewLink, PreviewPanel } from "./components/PreviewPanel";
@@ -64,8 +64,6 @@ export function App() {
   const api = useMemo(() => new Api(identity), [identity]);
 
   const [model, setModel] = useState<string>();
-  const [imageModels, setImageModels] = useState<ImageModels>();
-  const [imageModel, setImageModel] = useState(() => readStored("pi-forge.image-model", ""));
   const [catalog, setCatalog] = useState<ModelsResult>();
   const [modelKey, setModelKey] = useState<string>(() => readStored(MODEL_KEY, ""));
   const [effort, setEffort] = useState<string>(() => readStored(EFFORT_KEY, ""));
@@ -157,11 +155,6 @@ export function App() {
         setEffort((level) => (result.thinkingLevels.includes(level) ? level : result.defaultThinkingLevel));
       })
       .catch((e: Error) => { if (active) setNotice(e.message); });
-    api.imageModels().then((result) => {
-      if (!active) return;
-      setImageModels(result);
-      setImageModel((current) => result.models.includes(current) ? current : result.defaultModel);
-    }).catch((e: Error) => { if (active) setNotice(e.message); });
     api
       .agents()
       .then((list) => {
@@ -447,7 +440,7 @@ export function App() {
     const ctx = { startedAt: Date.now(), session: sessionId, preview: { opened: false } } as Parameters<typeof onRunEvent>[1];
     await streamRun((signal) =>
       api.run(
-        { agentId, sessionId, projectId, text, attachments, imageModel: agentId === "image-designer" ? imageModel || undefined : undefined, model: modelKey || undefined, thinkingLevel: effort || undefined },
+        { agentId, sessionId, projectId, text, attachments, model: modelKey || undefined, thinkingLevel: effort || undefined },
         (event) => {
           if (signal.aborted || apiRef.current !== api || nav !== navigation.current) return;
           if (event.type === "run") onUploaded?.();
@@ -539,9 +532,6 @@ export function App() {
     <Composer
       ref={composer}
       agent={agent}
-      imageModels={imageModels}
-      imageModel={imageModel}
-      onImageModel={(value) => { setImageModel(value); store("pi-forge.image-model", value); }}
       catalog={catalog}
       model={modelKey}
       effort={effort}
