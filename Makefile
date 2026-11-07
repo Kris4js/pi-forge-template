@@ -1,4 +1,4 @@
-.PHONY: install dev gateway web build test check docker
+.PHONY: install dev down status gateway web build test check docker
 
 install:            ## npm workspaces + go modules + document parser
 	npm install
@@ -14,8 +14,14 @@ install:            ## npm workspaces + go modules + document parser
 gateway:            ## build the Go gateway into bin/
 	cd gateway && go build -o ../bin/gateway ./cmd/gateway
 
-dev: gateway        ## gateway on :8090 (spawns the TS runtime); run `make web` in another shell
-	./bin/gateway
+dev: gateway        ## gateway + TS runtime on :8090 and Vite on :5173
+	node scripts/dev.mjs
+
+down:               ## stop the services started by make dev
+	node scripts/dev.mjs down
+
+status:             ## show the processes managed by make dev
+	node scripts/dev.mjs status
 
 web:                ## Vite dev server on :5173, proxies /v1 to the gateway
 	npm run dev -w web

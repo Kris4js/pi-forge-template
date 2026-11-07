@@ -31,9 +31,12 @@
 ```bash
 make install
 cp .env.example .env        # 填写模型配置（必填），未配置模型时 runtime 拒绝启动
-make dev                    # gateway :8090，自动拉起 runtime
-make web                    # 另开一个终端：http://localhost:5173
+make dev                    # 同时启动 gateway :8090、runtime 和前端 http://localhost:5173
 ```
+
+在另一终端运行 `make status` 查看托管进程状态，运行 `make down` 停止全部开发服务。
+这两个命令只管理 `make dev` 启动的服务，不影响单独运行的 `make web` 或 Docker 服务。
+状态表示进程是否运行，不代表接口健康；runtime 由网关管理，不单独探测。
 
 模型在 `.env` 中注册，二选一：
 
@@ -138,8 +141,7 @@ make build    # bin/gateway + web/dist；FORGE_WEB_DIR=web/dist 时由 gateway �
 
 ```bash
 make install  # 安装 npm、Go 及文档解析依赖
-make dev      # 启动网关及 TS runtime
-# 另一终端：make web
+make dev      # 同时启动网关、TS runtime 和前端
 ```
 
 `make install` 优先使用 uv 创建 Python 3.12 环境；没有 uv 时使用系统 `python3`（需要 3.10+ 及 venv/pip）。仅单独安装文档依赖时：

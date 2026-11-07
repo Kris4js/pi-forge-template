@@ -104,6 +104,14 @@
   white-space: nowrap;
 }
 
+.trace-title code {
+  font-family: var(--font-mono);
+  font-size: inherit;
+  padding: 2px 5px;
+  border-radius: 5px;
+  background: var(--cds-fill-ghost-selected);
+}
+
 .trace-description {
   flex-shrink: 0;
   color: var(--cds-text-muted);

@@ -260,8 +260,27 @@ function askTitle(tool: Tool) {
   return `询问：${label}`;
 }
 
+function skillName(tool: Tool): string | undefined {
+  if (tool.name !== "read") return undefined;
+  const args = tool.args as { path?: unknown; file_path?: unknown } | undefined;
+  const path = args?.path ?? args?.file_path;
+  if (typeof path !== "string") return undefined;
+  return path.replace(/\\/g, "/").match(/(?:^|\/)([^/]+)\/SKILL\.md$/)?.[1];
+}
+
 function toolTitle(tool: Tool) {
   if (tool.name === ASK_USER) return askTitle(tool);
+  const skill = skillName(tool);
+  if (skill) {
+    const title = <>读取技能 <code>{skill}</code></>;
+    switch (tool.status) {
+      case "running": return <>正在{title}</>;
+      case "pending": return <>等待审批：{title}</>;
+      case "error": return <>{title} 失败</>;
+      case "denied": return <>已拒绝{title}</>;
+      default: return title;
+    }
+  }
   switch (tool.status) {
     case "running":
       return `正在调用 ${tool.name}`;
@@ -283,7 +302,7 @@ function ToolStep({ tool, onDecide }: { tool: Tool; onDecide?: Decide }) {
   const status =
     tool.status === "running" ? "running" : pending || tool.status === "waiting" ? "approval" : tool.status === "success" ? undefined : "error";
   const args = JSON.stringify(tool.args ?? {}, null, 2);
-  const summary = tool.name === ASK_USER ? "" : argSummary(tool.args);
+  const summary = tool.name === ASK_USER || skillName(tool) ? "" : argSummary(tool.args);
   const htmlArg = (tool.args as { html?: unknown } | undefined)?.html;
   const openPreview = useContext(PreviewLink);
   const revision = tool.artifactRevision;

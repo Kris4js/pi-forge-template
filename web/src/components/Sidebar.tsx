@@ -75,6 +75,7 @@ export function Sidebar(props: Props) {
   return (
     <div className="sidebar-inner">
       <div className="brand">
+        <img className="brand-icon" src="/logo.png" alt="" width={28} height={28} />
         <span className="brand-wordmark">pi-forge</span>
         {props.onClose && (
           <Button className="mobile-only" size="icon" aria-label="关闭侧栏" icon={<X size={18} />} onClick={props.onClose} />

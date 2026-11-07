@@ -316,6 +316,12 @@ kbd {
   margin-bottom: 14px;
 }
 
+.brand-icon {
+  flex-shrink: 0;
+  margin-right: 8px;
+  border-radius: 6px;
+}
+
 .brand-wordmark {
   font-family: var(--font-display);
   font-size: 25px;
